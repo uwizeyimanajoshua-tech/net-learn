@@ -1,4 +1,4 @@
-# robots.txt for NET LEARN
+# robots.txt for NETECH
 User-agent: *
 Allow: /
 Allow: /api/documents

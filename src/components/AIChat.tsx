@@ -507,7 +507,7 @@ export default function AIChat({ userId, documents, initialDocId, darkMode }: AI
           {/* Sidebar footer branding */}
           <div className="p-4 border-t border-gray-200/15 dark:border-white/[0.04] bg-slate-900/20 text-[10px] text-gray-500 flex items-center gap-1.5 font-semibold shrink-0">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span>NET LEARN ChatGPT Copilot</span>
+            <span>NETECH Copilot</span>
           </div>
         </div>
       </div>

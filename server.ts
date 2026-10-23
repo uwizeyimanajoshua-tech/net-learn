@@ -1931,7 +1931,7 @@ app.post('/api/chats/:id/message', async (req, res) => {
         `**Key Points retrieved:**\n- ${ragContext.slice(0, 300)}...\n\n` +
         `For further official study, consult:\n- [Cisco Networking Academy](https://www.netacad.com/)\n- [Microsoft Learn Documentation](https://learn.microsoft.com/en-us/windows-server/)\n- [Rwanda TVET Board (RTB)](https://www.rtb.gov.rw/)\n\nWould you like me to generate a self-assessment quiz or flashcards based on this specific topic?`;
     } else {
-      aiText = `Hi there! I am NIT AI, your technical education mentor at NET LEARN.\n\n` +
+      aiText = `Hi there! I am NIT AI, your technical education mentor at NETECH.\n\n` +
         `To master **${text.slice(0, 35)}** effectively, review core protocol architectures, practice command configurations, and check official resources:\n\n` +
         `- [Cisco Networking Academy](https://www.netacad.com/)\n- [Microsoft Learn Technical Docs](https://learn.microsoft.com/)\n- [Rwanda TVET Board (RTB) Official Portal](https://www.rtb.gov.rw/)\n\nClick on any link above to be directed to the official website!`;
     }
@@ -1955,7 +1955,7 @@ app.post('/api/chats/:id/message', async (req, res) => {
       return `${m.sender === 'user' ? 'User' : 'Assistant'}: ${m.text}`;
     }).join('\n');
 
-    const systemInstruction = `You are NIT AI, a distinguished Senior Technical Education Mentor and Certification Examiner at NET LEARN Academy. 
+    const systemInstruction = `You are NIT AI, a distinguished Senior Technical Education Mentor and Certification Examiner at NETECH Academy. 
     Your goal is to guide students, provide precise answers to technical questions, and explain engineering and computer science concepts thoroughly.
     You have direct real-time access to Google Search to consult live documentation, protocol standards (RFCs, IEEE), current version releases, and verified developer guides.
     Always provide clear, thorough, and structured explanations with syntax-highlighted code blocks, command sequences, and real-world troubleshooting steps.

@@ -52,10 +52,10 @@ export default function AboutUs({ darkMode }: AboutUsProps) {
   };
 
   const faqs = [
-    { q: 'Is NET LEARN free for all students?', a: 'Yes! NET LEARN is 100% free. You can view course syllabus materials, practice on our interactive sandbox console, and consult with NIT AI without paying anything.' },
+    { q: 'Is NETECH free for all students?', a: 'Yes! NETECH is 100% free. You can view course syllabus materials, practice on our interactive sandbox console, and consult with NIT AI without paying anything.' },
     { q: 'Can I upload my own PDF textbook materials?', a: 'Absolutely. If you sign in as an Administrator, you can upload any textbook, lecture slide, or exam file. Our backend automatically extracts the text and splits it into searchable chapters for interactive study.' },
     { q: 'What is Curriculum & Live Grounding?', a: 'Our educational platform uses real-time curriculum retrieval and Google Search integration to cross-reference your exact uploaded chapters and check live documentation before answering, ensuring high accuracy and zero hallucinations.' },
-    { q: 'Where is NET LEARN based?', a: 'NET LEARN is proudly designed and maintained by senior software engineers in Kigali, Rwanda, to serve students preparing for technical careers and professional IT certifications across Africa!' }
+    { q: 'Where is NETECH based?', a: 'NETECH is proudly designed and maintained by senior software engineers in Kigali, Rwanda, to serve students preparing for technical careers and professional IT certifications across Africa!' }
   ];
 
   return (
@@ -75,7 +75,7 @@ export default function AboutUs({ darkMode }: AboutUsProps) {
             Africa’s Premier Interactive Technical Education Hub
           </h2>
           <p className="text-xs sm:text-sm leading-relaxed text-gray-500">
-            NET LEARN bridges the gap in technical skills across Rwanda and East Africa. Our mission is to democratize training for Networking, Linux operations, Active Directory administration, Cyber Security, and more by pairing standard textbooks with intelligent, context-grounded NIT AI mentors and interactive sandboxes.
+            NETECH bridges the gap in technical skills across Rwanda and East Africa. Our mission is to democratize training for Networking, Linux operations, Active Directory administration, Cyber Security, and more by pairing standard textbooks with intelligent, context-grounded NIT AI mentors and interactive sandboxes.
           </p>
         </div>
       </div>
@@ -195,7 +195,7 @@ export default function AboutUs({ darkMode }: AboutUsProps) {
             Frequently Asked Questions
           </h3>
           <p className="text-[11px] text-gray-500 font-bold uppercase tracking-widest mt-0.5">
-            Everything you need to know about the NET LEARN framework
+            Everything you need to know about the NETECH framework
           </p>
         </div>
 

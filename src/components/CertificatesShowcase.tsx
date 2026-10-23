@@ -207,7 +207,7 @@ export default function CertificatesShowcase({ darkMode, progress, documents, us
                   </div>
 
                   <h1 className="font-display font-black text-2xl sm:text-3xl tracking-widest text-teal-500 uppercase">
-                    NET LEARN
+                    NETECH
                   </h1>
                   <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
                     AI-Guided Technical Education Network &bull; Kigali, Rwanda
@@ -262,7 +262,7 @@ export default function CertificatesShowcase({ darkMode, progress, documents, us
                 No Certificate Selected
               </h3>
               <p className="text-xs text-gray-500 max-w-xs mt-1">
-                Select a certified credential from the left deck to view, print, or share your verifiable NET LEARN qualification.
+                Select a certified credential from the left deck to view, print, or share your verifiable NETECH qualification.
               </p>
             </div>
           )}

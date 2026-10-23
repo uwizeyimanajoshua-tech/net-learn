@@ -195,7 +195,7 @@ export default function CommunityForum({ darkMode, userId }: CommunityForumProps
 
   const handleTranslate = async (postId: string) => {
     setTranslatingId(postId);
-    // Simulated fast local high-fidelity Kinyarwanda translation for NET LEARN
+    // Simulated fast local high-fidelity Kinyarwanda translation for NETECH
     setTimeout(() => {
       setPosts(prev => prev.map(p => {
         if (p.id === postId) {

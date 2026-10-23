@@ -236,17 +236,14 @@ export default function App() {
           <div className="flex items-center gap-2.5 cursor-pointer hover:opacity-90 transition-all" onClick={() => handleNavigateToSection('dashboard')}>
             <img 
               src={netLearnLogo} 
-              alt="NET LEARN Logo" 
+              alt="NETECH Logo" 
               className="w-10 h-10 object-contain rounded-xl shadow-sm border border-emerald-500/20"
               referrerPolicy="no-referrer"
               onError={(e) => { e.currentTarget.src = '/logo.jpg'; }}
             />
             <div className="flex flex-col text-left">
-              <span className={`font-display font-black text-base tracking-tight ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                NET LEARN
-              </span>
-              <span className="text-[9px] text-brand-primary font-bold uppercase tracking-widest font-mono">
-                Interactive Labs
+              <span className={`font-display font-black text-lg tracking-tight ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                NETECH
               </span>
             </div>
           </div>
@@ -423,7 +420,7 @@ export default function App() {
       {/* 4. MOBILE DRAWER NAVIGATION */}
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-40 bg-slate-950/95 backdrop-blur-md lg:hidden pt-20 px-6 space-y-4 animate-fade-in text-left">
-          <div className="text-[10px] font-mono font-bold text-teal-400 uppercase tracking-widest border-b border-white/5 pb-2">NET LEARN Sections</div>
+          <div className="text-[10px] font-mono font-bold text-teal-400 uppercase tracking-widest border-b border-white/5 pb-2">NETECH Sections</div>
           {mainNavItems.map(item => (
             <button
               key={item.id}

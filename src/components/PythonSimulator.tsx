@@ -50,7 +50,7 @@ class_scores = {
 
 results = analyze_students(class_scores)
 
-print("=== NET LEARN Python Diagnostics ===")
+print("=== NETECH Python Diagnostics ===")
 for metric, val in results.items():
     print(f" • {metric.replace('_', ' ').title()}: {val}")
 
@@ -563,7 +563,7 @@ export default function PythonSimulator({
           <div className="flex items-center gap-2 pl-2">
             <Code2 className="w-4 h-4 text-emerald-400" />
             <span className="font-mono text-xs font-bold text-gray-200">
-              NET LEARN Python & Machine Learning Execution Sandbox
+              NETECH Python & Machine Learning Execution Sandbox
             </span>
             <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-500/20 text-emerald-400 font-semibold hidden sm:inline-block">
               Python 3.12 (CPython / ML Engine)

@@ -1823,7 +1823,7 @@ export default function DocumentViewer({
                     <div className={`p-4 rounded-2xl border text-xs leading-relaxed ${
                       darkMode ? 'bg-emerald-500/5 border-emerald-500/10 text-gray-300' : 'bg-emerald-50 border-emerald-200 text-emerald-950'
                     }`}>
-                      <strong className="text-brand-primary block mb-1">NET LEARN Code & Concept Sandbox</strong>
+                      <strong className="text-brand-primary block mb-1">NETECH Code & Concept Sandbox</strong>
                       Write or modify code, scripts, database queries, or general syllabus concepts below. Hit <strong className="text-brand-primary">Run & Analyze</strong> to simulate live compilation alongside real-time diagnostic insights!
                     </div>
 

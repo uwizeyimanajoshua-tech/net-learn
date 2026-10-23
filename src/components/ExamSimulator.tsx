@@ -154,7 +154,7 @@ export default function ExamSimulator({
   const handleDownloadQuestionCode = (q: QuizQuestion, index: number, cat: string) => {
     const details = extractCodeDetails(q.question, cat);
     const ext = details.language === 'python' ? 'py' : details.language === 'javascript' ? 'js' : details.language === 'bash' ? 'sh' : 'sql';
-    const content = `# NET LEARN Assessment Code - Question ${index + 1}\n# Topic: ${q.topicTag || cat}\n# Question: ${q.question.replace(/\n/g, ' ')}\n\n${details.code}\n`;
+    const content = `# NETECH Assessment Code - Question ${index + 1}\n# Topic: ${q.topicTag || cat}\n# Question: ${q.question.replace(/\n/g, ' ')}\n\n${details.code}\n`;
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');

@@ -41,7 +41,7 @@ export default function LandingPage({ onEnterApp, darkMode, setDarkMode, onOpenA
               <Sparkles className="w-5 h-5" id="brand-logo" />
             </div>
             <span className="font-display font-bold text-xl tracking-tight bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-400 bg-clip-text text-transparent">
-              NET LEARN Academy
+              NETECH Academy
             </span>
           </div>
           
@@ -309,7 +309,7 @@ export default function LandingPage({ onEnterApp, darkMode, setDarkMode, onOpenA
             className="px-8 py-3.5 rounded-2xl font-display font-semibold text-sm bg-indigo-600 hover:bg-indigo-500 text-white shadow-xl hover:shadow-indigo-500/20 hover:scale-103 active:scale-97 transition-all flex items-center gap-2.5 mx-auto"
             id="bottom-cta-enter"
           >
-            Enter NET LEARN Workspace <ArrowRight className="w-4 h-4" />
+            Enter NETECH Workspace <ArrowRight className="w-4 h-4" />
           </button>
         </div>
       </main>
@@ -319,10 +319,10 @@ export default function LandingPage({ onEnterApp, darkMode, setDarkMode, onOpenA
         <div className="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-6">
           <div className="flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-indigo-400" />
-            <span className="font-display font-semibold text-sm text-gray-400">NET LEARN Academy Platform</span>
+            <span className="font-display font-semibold text-sm text-gray-400">NETECH Academy Platform</span>
           </div>
           <span className="text-xs text-gray-500">
-            &copy; 2026 NET LEARN. Crafted as a high-fidelity educational companion. All rights reserved.
+            &copy; 2026 NETECH. Crafted as a high-fidelity educational companion. All rights reserved.
           </span>
         </div>
       </footer>

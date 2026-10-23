@@ -263,7 +263,7 @@ Sep 29 07:44:11 netlearn-srv01 sudo: student : TTY=pts/0 ; PWD=/home/student ; U
                     group: 'root',
                     size: 340,
                     mtime: 'Sep 29 07:00',
-                    content: '<!DOCTYPE html>\n<html>\n<head><title>NET LEARN Enterprise Web Node</title></head>\n<body>\n<h1>Nginx Web Server is Active</h1>\n<p>Ubuntu 24.04 LTS host node 01</p>\n</body>\n</html>'
+                    content: '<!DOCTYPE html>\n<html>\n<head><title>NETECH Enterprise Web Node</title></head>\n<body>\n<h1>Nginx Web Server is Active</h1>\n<p>Ubuntu 24.04 LTS host node 01</p>\n</body>\n</html>'
                   }
                 }
               }
@@ -298,7 +298,7 @@ Sep 29 07:44:11 netlearn-srv01 sudo: student : TTY=pts/0 ; PWD=/home/student ; U
                 size: 512,
                 mtime: 'Sep 29 07:00',
                 content: `========================================================
- Welcome to the NET LEARN Linux OS Terminal Simulator!
+ Welcome to the NETECH Linux OS Terminal Simulator!
  Operating System: Ubuntu 24.04 LTS (x86_64 Linux 6.8)
 ========================================================
 
@@ -437,7 +437,7 @@ export default function LinuxSimulator({
     {
       id: 'init-2',
       command: 'cat /home/student/welcome.txt',
-      output: `========================================================\n Welcome to the NET LEARN Linux OS Terminal Simulator!\n Operating System: Ubuntu 24.04 LTS (x86_64 Linux 6.8)\n========================================================\nType 'help' to inspect available system commands, or click any Lab Scenario below to start guided tasks!`,
+      output: `========================================================\n Welcome to the NETECH Linux OS Terminal Simulator!\n Operating System: Ubuntu 24.04 LTS (x86_64 Linux 6.8)\n========================================================\nType 'help' to inspect available system commands, or click any Lab Scenario below to start guided tasks!`,
       user: 'student',
       cwd: '/home/student',
       timestamp: '07:20:01'
@@ -741,7 +741,7 @@ export default function LinuxSimulator({
 
       case 'help': {
         return {
-          output: `NET LEARN Linux Terminal Emulator (Ubuntu 24.04.1 LTS)
+          output: `NETECH Linux Terminal Emulator (Ubuntu 24.04.1 LTS)
 Common Available Commands:
   • Navigation & FS : ls, cd, pwd, cat, mkdir, touch, rm, cp, mv, echo, tree
   • Inspection & Logs: grep, head, tail, wc, nano, chmod, chown
@@ -1437,7 +1437,7 @@ Processing triggers for man-db...`
           <div className="flex items-center gap-2 pl-2">
             <Terminal className="w-4 h-4 text-emerald-400" />
             <span className="font-mono text-xs font-bold text-gray-200">
-              NET LEARN Linux OS Emulator (Ubuntu 24.04 LTS)
+              NETECH Linux OS Emulator (Ubuntu 24.04 LTS)
             </span>
             <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-500/20 text-emerald-400 font-semibold hidden sm:inline-block">
               ● Active Node: netlearn-srv01

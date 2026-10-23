@@ -262,7 +262,7 @@ export default function AuthModal({ onSuccess, onClose, darkMode }: AuthModalPro
           <Sparkles className="w-5 h-5" />
         </div>
         <h3 className="font-display font-black text-2xl tracking-tight">
-          {mode === 'login' && 'Sign In to NET LEARN'}
+          {mode === 'login' && 'Sign In to NETECH'}
           {mode === 'register' && 'Create Your Account'}
           {mode === 'forgot' && 'Reset Your Password'}
           {mode === 'verify' && 'Verify Account'}
