@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { StudentProgress, Document, CategoryName, CATEGORIES } from '../types.js';
 import ImageCarousel from './ImageCarousel.js';
+import netLearnLogo from '../assets/images/net_learn_logo_1784436382187.jpg';
 
 interface DashboardProps {
   progress: StudentProgress | null;
@@ -646,10 +647,11 @@ export default function Dashboard({ progress, documents, onNavigateToSection, on
           <div className="space-y-1 text-center sm:text-left">
             <div className="flex items-center justify-center sm:justify-start gap-2">
               <img 
-                src="/src/assets/images/net_learn_logo_1784436382187.jpg" 
+                src={netLearnLogo} 
                 alt="NET LEARN Logo" 
                 className="w-8 h-8 object-contain rounded-lg shadow-sm border border-emerald-500/20"
                 referrerPolicy="no-referrer"
+                onError={(e) => { e.currentTarget.src = '/logo.jpg'; }}
               />
               <span className={`font-display font-black text-base ${darkMode ? 'text-white' : 'text-gray-900'}`}>
                 NET LEARN

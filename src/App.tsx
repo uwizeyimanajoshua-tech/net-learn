@@ -20,6 +20,7 @@ import LinuxSimulator from './components/LinuxSimulator.js';
 import PythonSimulator from './components/PythonSimulator.js';
 import { Document, StudentProgress, CategoryName, CATEGORIES } from './types.js';
 import { SIDEBAR_CATEGORIES } from './data/chapters.js';
+import netLearnLogo from './assets/images/net_learn_logo_1784436382187.jpg';
 
 export default function App() {
   const darkMode = false;
@@ -234,10 +235,11 @@ export default function App() {
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2.5 cursor-pointer hover:opacity-90 transition-all" onClick={() => handleNavigateToSection('dashboard')}>
             <img 
-              src="/src/assets/images/net_learn_logo_1784436382187.jpg" 
+              src={netLearnLogo} 
               alt="NET LEARN Logo" 
               className="w-10 h-10 object-contain rounded-xl shadow-sm border border-emerald-500/20"
               referrerPolicy="no-referrer"
+              onError={(e) => { e.currentTarget.src = '/logo.jpg'; }}
             />
             <div className="flex flex-col text-left">
               <span className={`font-display font-black text-base tracking-tight ${darkMode ? 'text-white' : 'text-gray-900'}`}>

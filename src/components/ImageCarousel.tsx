@@ -1,22 +1,28 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ChevronLeft, ChevronRight, Sparkles } from 'lucide-react';
+import slideVr from '../assets/images/slide_vr_classroom_1784235517208.jpg';
+import slideMap from '../assets/images/slide_knowledge_map_1784235530644.jpg';
+import slideProf from '../assets/images/slide_ai_professor_1784235542693.jpg';
 
 const SLIDES = [
   {
-    image: '/src/assets/images/slide_vr_classroom_1784235517208.jpg',
+    image: slideVr,
+    fallback: '/images/slide_vr_classroom_1784235517208.jpg',
     title: 'Interactive VR Classrooms',
     description: 'Step into a three-dimensional cognitive space where network nodes and subnet divisions are visual components.',
     badge: 'Virtual Reality'
   },
   {
-    image: '/src/assets/images/slide_knowledge_map_1784235530644.jpg',
+    image: slideMap,
+    fallback: '/images/slide_knowledge_map_1784235530644.jpg',
     title: 'Syllabus Knowledge Maps',
     description: 'Trace complex courses, Linux configurations, and Cisco protocols mapped in a single semantic brain graph.',
     badge: 'Cognitive Mapping'
   },
   {
-    image: '/src/assets/images/slide_ai_professor_1784235542693.jpg',
+    image: slideProf,
+    fallback: '/images/slide_ai_professor_1784235542693.jpg',
     title: 'Personalized AI Professors',
     description: 'Your virtual technical tutor available 24/7 to formulate mock quizzes, grade lab exercises, and explain topics in multiple languages.',
     badge: 'Gemini RAG Engine'
@@ -83,6 +89,7 @@ export default function ImageCarousel({ darkMode }: { darkMode: boolean }) {
               alt={SLIDES[current].title}
               className="w-full h-full object-cover"
               referrerPolicy="no-referrer"
+              onError={(e) => { e.currentTarget.src = SLIDES[current].fallback; }}
             />
             {/* Vignette Overlay */}
             <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/40 to-transparent" />

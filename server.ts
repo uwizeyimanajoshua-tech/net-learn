@@ -44,7 +44,7 @@ const upload = multer({
 
 // Middleware wrapper that intercepts Multer errors and returns clear JSON instead of HTML
 const handleUploadFile = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  upload.single('file')(req, res, (err: any) => {
+  (upload.single('file') as any)(req, res, (err: any) => {
     if (err) {
       console.error('Multer upload middleware error:', err);
       if (err.code === 'LIMIT_FILE_SIZE') {
@@ -56,9 +56,12 @@ const handleUploadFile = (req: express.Request, res: express.Response, next: exp
   });
 };
 
+// Clean and sanitize Gemini API key (remove accidental quotes or whitespace)
+const rawGeminiKey = (process.env.GEMINI_API_KEY || '').replace(/^["']|["']$/g, '').trim();
+
 // Initialize Gemini SDK with User-Agent for tracking
 const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY || 'MOCK_KEY',
+  apiKey: rawGeminiKey || 'MOCK_KEY',
   httpOptions: {
     headers: {
       'User-Agent': 'aistudio-build'
@@ -68,8 +71,7 @@ const ai = new GoogleGenAI({
 
 // Helper to determine if Gemini is configured/available
 function isGeminiAvailable(): boolean {
-  const key = process.env.GEMINI_API_KEY;
-  return !!key && key !== 'MY_GEMINI_API_KEY' && key !== '';
+  return !!rawGeminiKey && rawGeminiKey !== 'MY_GEMINI_API_KEY' && rawGeminiKey !== 'MOCK_KEY';
 }
 
 // Reusable robust wrapper to execute Gemini requests with retry policies and model failover
