@@ -4,7 +4,6 @@ import fs from 'fs';
 import multer from 'multer';
 import dotenv from 'dotenv';
 import { PDFParse } from 'pdf-parse';
-import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import { db } from './src/db/store.ts';
 import { CATEGORIES, ChatMessage, ChatSession, Document, DocumentSection, AISummary, Quiz, QuizQuestion, Flashcard } from './src/types.ts';
@@ -2920,6 +2919,7 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 // -------------------------------------------------------------
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa'
