@@ -1,0 +1,10 @@
+Curriculum Study Module: Database Administration & SQL Optimization
+
+Chapter 1: Relational Database Architecture & 3NF Normalization
+Relational database management systems (RDBMS) organize data into structured tables with primary keys and foreign keys. Third Normal Form (3NF) eliminates data redundancy and guarantees data integrity.
+
+Chapter 2: SQL Transaction Management & ACID Properties
+Every enterprise transaction must adhere to ACID: Atomicity, Consistency, Isolation, and Durability. PostgreSQL and MySQL employ Multi-Version Concurrency Control (MVCC) to handle high concurrency without table-level locking.
+
+Chapter 3: Query Optimization, Indexing & High Availability
+B-Tree indexes provide logarithmic O(log N) search times. Streaming replication and connection pooling with PgBouncer provide zero-downtime failover.

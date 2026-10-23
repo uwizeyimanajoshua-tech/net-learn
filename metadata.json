@@ -1,0 +1,6 @@
+{
+  "name": "NET LEARN",
+  "description": "A premium educational platform styled after W3Schools, built for Networking, IT, Linux, Python, and Technology students featuring integrated interactive simulations, virtual labs, and exams.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

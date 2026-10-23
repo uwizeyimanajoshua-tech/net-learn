@@ -1,0 +1,164 @@
+{
+  "entities": {
+    "Document": {
+      "title": "Document",
+      "description": "Educational notes or textbook uploaded by admin",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique ID of the document"
+        },
+        "name": {
+          "type": "string",
+          "description": "Original file name of the document"
+        },
+        "type": {
+          "type": "string",
+          "description": "File format type (e.g. pdf, txt, docx)"
+        },
+        "size": {
+          "type": "number",
+          "description": "File size in bytes"
+        },
+        "category": {
+          "type": "string",
+          "description": "Educational category (e.g. Networking, Linux, Cloud)"
+        },
+        "textContent": {
+          "type": "string",
+          "description": "Extracted text content of the document"
+        },
+        "uploadedAt": {
+          "type": "string",
+          "description": "ISO timestamp of when the document was uploaded"
+        },
+        "userId": {
+          "type": "string",
+          "description": "ID of the user who uploaded the document"
+        },
+        "bookmarks": {
+          "type": "array",
+          "description": "Array of user IDs who bookmarked this document"
+        },
+        "splitContent": {
+          "type": "array",
+          "description": "Document sections split logically for search and RAG"
+        },
+        "summary": {
+          "type": "object",
+          "description": "Structured AI-generated summary"
+        },
+        "hasDrawings": {
+          "type": "boolean",
+          "description": "Whether document has architectural diagrams"
+        },
+        "fileUrl": {
+          "type": "string",
+          "description": "Stream URL for document"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "category",
+        "textContent",
+        "uploadedAt",
+        "userId"
+      ]
+    },
+    "User": {
+      "title": "User",
+      "description": "User profile and account settings",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique user ID" },
+        "email": { "type": "string", "description": "Email address" },
+        "username": { "type": "string", "description": "Display username" },
+        "name": { "type": "string", "description": "Full name" },
+        "role": { "type": "string", "description": "Role (student or admin)" },
+        "isVerified": { "type": "boolean", "description": "Verification status" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" }
+      },
+      "required": ["id", "email", "role"]
+    },
+    "ChatSession": {
+      "title": "ChatSession",
+      "description": "AI study chat conversation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique chat ID" },
+        "userId": { "type": "string", "description": "Owner user ID" },
+        "title": { "type": "string", "description": "Conversation title" },
+        "messages": { "type": "array", "description": "Array of chat messages" },
+        "createdAt": { "type": "string", "description": "ISO timestamp" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp" }
+      },
+      "required": ["id", "userId", "title"]
+    },
+    "Quiz": {
+      "title": "Quiz",
+      "description": "Interactive multiple choice quiz",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique quiz ID" },
+        "title": { "type": "string", "description": "Quiz title" },
+        "category": { "type": "string", "description": "Course category" },
+        "docId": { "type": "string", "description": "Associated document ID" },
+        "questions": { "type": "array", "description": "Questions array" },
+        "createdAt": { "type": "string", "description": "ISO timestamp" }
+      },
+      "required": ["id", "title", "category", "questions"]
+    },
+    "Flashcard": {
+      "title": "Flashcard",
+      "description": "Study flashcard",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique flashcard ID" },
+        "userId": { "type": "string", "description": "User ID" },
+        "category": { "type": "string", "description": "Category" },
+        "front": { "type": "string", "description": "Front prompt" },
+        "back": { "type": "string", "description": "Back explanation" },
+        "isMastered": { "type": "boolean", "description": "Mastered status" }
+      },
+      "required": ["id", "userId", "front", "back"]
+    },
+    "TestConnection": {
+      "title": "TestConnection",
+      "description": "Health check document",
+      "type": "object",
+      "properties": {
+        "ping": { "type": "boolean", "description": "Ping indicator" },
+        "time": { "type": "string", "description": "Timestamp" }
+      },
+      "required": ["ping"]
+    }
+  },
+  "firestore": {
+    "/documents/{documentId}": {
+      "schema": "Document",
+      "description": "Collection of learning documents and textbooks uploaded by admins"
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile and accounts"
+    },
+    "/chats/{chatId}": {
+      "schema": "ChatSession",
+      "description": "Student AI study chat sessions"
+    },
+    "/quizzes/{quizId}": {
+      "schema": "Quiz",
+      "description": "Course quizzes and self-assessments"
+    },
+    "/flashcards/{flashcardId}": {
+      "schema": "Flashcard",
+      "description": "Study flashcards"
+    },
+    "/test/{testId}": {
+      "schema": "TestConnection",
+      "description": "Firestore health check document"
+    }
+  }
+}

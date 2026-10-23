@@ -1,0 +1,12 @@
+# robots.txt for NET LEARN
+User-agent: *
+Allow: /
+Allow: /api/documents
+Allow: /sitemap.xml
+Disallow: /api/auth/
+Disallow: /api/chats/
+Disallow: /api/progress/
+Disallow: /api/documents/upload
+Disallow: /api/upload-image
+
+Sitemap: /sitemap.xml
