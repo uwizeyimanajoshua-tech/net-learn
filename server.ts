@@ -6,7 +6,8 @@ import dotenv from 'dotenv';
 import { PDFParse } from 'pdf-parse';
 import { GoogleGenAI, Type } from '@google/genai';
 import { db } from './src/db/store.ts';
-import { CATEGORIES, ChatMessage, ChatSession, Document, DocumentSection, AISummary, Quiz, QuizQuestion, Flashcard } from './src/types.ts';
+import { CATEGORIES } from './src/types.ts';
+import type { ChatMessage, ChatSession, Document, DocumentSection, AISummary, Quiz, QuizQuestion, Flashcard } from './src/types.ts';
 
 dotenv.config();
 
@@ -765,7 +766,7 @@ app.post('/api/auth/register', (req, res) => {
     return res.status(400).json({ error: 'An account with this email address already exists. Please log in.' });
   }
 
-  const isOwnerAdmin = cleanEmail === 'uwizeyimanajoshua@gmail.com' || cleanEmail.includes('admin') || cleanUsername.toLowerCase() === 'joshua';
+  const isOwnerAdmin = cleanEmail === 'uwizeyimanajoshua@gmail.com';
   const newUser = db.createUser({
     id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
     email: cleanEmail,
@@ -799,27 +800,21 @@ app.post('/api/auth/login', (req, res) => {
   const cleanIdentifier = email.trim().toLowerCase();
   const cleanPass = typeof password === 'string' ? password.trim() : password;
 
-  // Dedicated admin credentials check
-  const isAdminCredentials = 
-    (cleanIdentifier === 'joshua' || 
-     cleanIdentifier === 'admin' || 
-     cleanIdentifier === 'uwizeyimanajoshua@gmail.com' || 
-     cleanIdentifier === 'joshua@nexalearn.ai' || 
-     cleanIdentifier === 'admin@netech.ai') && 
-    (cleanPass === '123' || cleanPass === 'admin123');
+  // Dedicated admin credentials check - ONLY uwizeyimanajoshua@gmail.com
+  const isOwnerAdmin = cleanIdentifier === 'uwizeyimanajoshua@gmail.com';
 
-  if (isAdminCredentials) {
+  if (isOwnerAdmin && (cleanPass === '123' || cleanPass === 'admin123')) {
     db.updateUser('usr_admin', { 
-      username: 'Joshua', 
+      username: 'Joshua Uwizeyimana', 
       email: 'uwizeyimanajoshua@gmail.com', 
-      password: '123',
+      password: cleanPass,
       role: 'admin',
       isVerified: true
     });
     return res.json({
       message: 'Login successful as Administrator (Joshua)!',
       token: `jwt_usr_admin_${Date.now()}`,
-      user: { id: 'usr_admin', email: 'uwizeyimanajoshua@gmail.com', username: 'Joshua', role: 'admin', isVerified: true }
+      user: { id: 'usr_admin', email: 'uwizeyimanajoshua@gmail.com', username: 'Joshua Uwizeyimana', role: 'admin', isVerified: true }
     });
   }
 
@@ -830,13 +825,15 @@ app.post('/api/auth/login', (req, res) => {
   );
 
   if (!user || user.password !== cleanPass) {
-    return res.status(401).json({ error: 'Invalid credentials. Please verify your email/username and password, or use Google Sign-In.' });
+    return res.status(401).json({ error: 'Invalid credentials. Please verify your email and password, or use Google Sign-In.' });
   }
+
+  const role = user.email.trim().toLowerCase() === 'uwizeyimanajoshua@gmail.com' ? 'admin' : 'student';
 
   return res.json({
     message: 'Login successful!',
     token: `jwt_${user.id}_${Date.now()}`,
-    user: { id: user.id, email: user.email, username: user.username, role: user.role, isVerified: user.isVerified }
+    user: { id: user.id, email: user.email, username: user.username, role, isVerified: user.isVerified }
   });
 });
 
@@ -852,11 +849,17 @@ app.post('/api/auth/google', (req, res) => {
     cleanEmail = `${cleanEmail}@gmail.com`;
   }
 
+  const isDefaultAdmin = cleanEmail === 'uwizeyimanajoshua@gmail.com';
+
   // Check if user already exists
   const existingUser = db.getUserByEmail(cleanEmail);
   if (existingUser) {
     if (!existingUser.isVerified) {
       db.updateUser(existingUser.id, { isVerified: true });
+    }
+    const currentRole = isDefaultAdmin ? 'admin' : (existingUser.role === 'admin' ? 'student' : existingUser.role);
+    if (existingUser.role !== currentRole) {
+      db.updateUser(existingUser.id, { role: currentRole });
     }
     return res.json({
       message: `Welcome back, ${existingUser.username}! Successfully signed in with Google.`,
@@ -865,7 +868,7 @@ app.post('/api/auth/google', (req, res) => {
         id: existingUser.id,
         email: existingUser.email,
         username: existingUser.username,
-        role: existingUser.role,
+        role: currentRole,
         isVerified: true,
         avatar: picture || (existingUser as any).avatar,
         authProvider: 'google'
@@ -873,11 +876,7 @@ app.post('/api/auth/google', (req, res) => {
     });
   }
 
-  // Auto-provision new student account (or admin if authorized email)
-  const isDefaultAdmin = 
-    cleanEmail === 'joshua@nexalearn.ai' || 
-    cleanEmail === 'admin@nexalearn.ai' || 
-    cleanEmail === 'uwizeyimanajoshua@gmail.com';
+  // Auto-provision new account - ONLY uwizeyimanajoshua@gmail.com can be admin
 
   const generatedUsername = (name && name.trim()) || cleanEmail.split('@')[0];
   const newUser = db.createUser({
@@ -1044,10 +1043,7 @@ app.post('/api/documents/upload', handleUploadFile, async (req, res) => {
     // Enforce Admin-Only upload permissions
     const requestingUser = db.getUserById(userId);
     const userRoleHeader = req.headers['x-user-role'];
-    const isAdmin = (requestingUser && requestingUser.role === 'admin') || 
-                    requestingUser?.email?.toLowerCase() === 'uwizeyimanajoshua@gmail.com' ||
-                    requestingUser?.email?.toLowerCase() === 'joshua@nexalearn.ai' ||
-                    userRoleHeader === 'admin';
+    const isAdmin = requestingUser?.email?.toLowerCase() === 'uwizeyimanajoshua@gmail.com';
 
     if (!isAdmin) {
       console.warn(`[Security] Blocked unauthorized document upload attempt by userId: ${userId}`);
@@ -1337,10 +1333,7 @@ app.delete('/api/documents/:id', async (req, res) => {
   const userId = req.body?.userId || req.query?.userId || req.headers['x-user-id'];
   const userRoleHeader = req.headers['x-user-role'];
   const requestingUser = userId ? db.getUserById(String(userId)) : null;
-  const isAdmin = (requestingUser && requestingUser.role === 'admin') || 
-                  requestingUser?.email?.toLowerCase() === 'uwizeyimanajoshua@gmail.com' ||
-                  requestingUser?.email?.toLowerCase() === 'joshua@nexalearn.ai' ||
-                  userRoleHeader === 'admin';
+  const isAdmin = requestingUser?.email?.toLowerCase() === 'uwizeyimanajoshua@gmail.com';
 
   if (!isAdmin) {
     return res.status(403).json({ error: 'Permission Denied: Only administrators can delete course documents.' });
@@ -1370,10 +1363,7 @@ app.post('/api/documents', async (req, res) => {
     // Enforce Admin-Only creation permissions
     const requestingUser = db.getUserById(userId);
     const userRoleHeader = req.headers['x-user-role'];
-    const isAdmin = (requestingUser && requestingUser.role === 'admin') || 
-                    requestingUser?.email?.toLowerCase() === 'uwizeyimanajoshua@gmail.com' ||
-                    requestingUser?.email?.toLowerCase() === 'joshua@nexalearn.ai' ||
-                    userRoleHeader === 'admin';
+    const isAdmin = requestingUser?.email?.toLowerCase() === 'uwizeyimanajoshua@gmail.com';
 
     if (!isAdmin) {
       console.warn(`[Security] Blocked unauthorized manual document creation by userId: ${userId}`);

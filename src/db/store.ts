@@ -2,7 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore, Firestore, doc, setDoc, updateDoc, deleteDoc, collection, getDocs, writeBatch } from 'firebase/firestore';
-import { User, Document, ChatSession, Quiz, Flashcard, StudentProgress, CATEGORIES } from '../types.ts';
+import type { User, Document, ChatSession, Quiz, Flashcard, StudentProgress } from '../types.ts';
+import { CATEGORIES } from '../types.ts';
 
 // Read Firebase applet configuration
 const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
@@ -62,7 +63,7 @@ const DEFAULT_DB: DatabaseSchema = {
     {
       id: 'usr_admin',
       email: 'uwizeyimanajoshua@gmail.com',
-      username: 'joshua',
+      username: 'Joshua Uwizeyimana',
       password: '123',
       role: 'admin',
       isVerified: true,
@@ -70,8 +71,8 @@ const DEFAULT_DB: DatabaseSchema = {
     },
     {
       id: 'usr_student',
-      email: 'student@nexalearn.ai',
-      username: 'Guest Student',
+      email: 'student@netech.edu',
+      username: 'Student',
       password: 'student123',
       role: 'student',
       isVerified: true,

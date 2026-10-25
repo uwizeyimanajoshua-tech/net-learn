@@ -339,22 +339,10 @@ export default function App() {
             <div className="flex items-center gap-2">
               <button
                 onClick={() => {
-                  setAuthInitialTab('google');
-                  setShowAuthOverlay(true);
-                }}
-                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-white text-gray-800 hover:bg-gray-100 border border-gray-300 shadow-sm flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
-                title="Sign in or create account with Google (Gmail)"
-                id="btn-nav-google-auth"
-              >
-                <GoogleIcon className="w-3.5 h-3.5 shrink-0" />
-                <span className="font-bold text-xs">Google Login</span>
-              </button>
-              <button
-                onClick={() => {
                   setAuthInitialTab('standard');
                   setShowAuthOverlay(true);
                 }}
-                className="hidden sm:flex px-3 py-1.5 rounded-xl text-xs font-bold bg-brand-primary hover:bg-brand-primary-hover text-white shadow-md items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                className="px-4 py-1.5 rounded-xl text-xs font-bold bg-brand-primary hover:bg-brand-primary-hover text-white shadow-md flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
                 id="btn-nav-standard-auth"
               >
                 <Shield className="w-3.5 h-3.5 text-emerald-100" /> Sign In
