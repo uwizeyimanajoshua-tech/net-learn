@@ -585,9 +585,11 @@ export default function App() {
           {activeTab === 'ai_chat' && (
             <AIChat 
               userId={user.id} 
+              user={user}
               documents={documents} 
               initialDocId={navFilterDocId}
               darkMode={darkMode} 
+              onNavigateToTab={(tab) => setActiveTab(tab)}
             />
           )}
 
