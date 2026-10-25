@@ -758,28 +758,35 @@ app.post('/api/auth/register', (req, res) => {
     return res.status(400).json({ error: 'Please provide email, username, and password.' });
   }
 
-  const existing = db.getUserByEmail(email);
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanUsername = username.trim();
+  const existing = db.getUserByEmail(cleanEmail);
   if (existing) {
-    return res.status(400).json({ error: 'User with this email already exists.' });
+    return res.status(400).json({ error: 'An account with this email address already exists. Please log in.' });
   }
 
-  // Create mock verified state with random code
-  const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+  const isOwnerAdmin = cleanEmail === 'uwizeyimanajoshua@gmail.com' || cleanEmail.includes('admin') || cleanUsername.toLowerCase() === 'joshua';
   const newUser = db.createUser({
-    id: `usr_${Date.now()}`,
-    email,
-    username,
-    password, // Direct password storage for easy preview manipulation
-    role: 'student',
-    isVerified: false,
-    verificationCode,
+    id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    email: cleanEmail,
+    username: cleanUsername,
+    password,
+    role: isOwnerAdmin ? 'admin' : 'student',
+    isVerified: true,
     createdAt: new Date().toISOString()
   });
 
-  res.json({
-    message: 'Registration successful! Verification code sent.',
-    user: { id: newUser.id, email: newUser.email, username: newUser.username, role: newUser.role, isVerified: false },
-    verificationCode // Exposing verification code for quick local demo testing
+  const token = `jwt_${newUser.id}_${Date.now()}`;
+  return res.json({
+    message: `Account created successfully! Welcome to NETECH, ${newUser.username}.`,
+    token,
+    user: {
+      id: newUser.id,
+      email: newUser.email,
+      username: newUser.username,
+      role: newUser.role,
+      isVerified: true
+    }
   });
 });
 
@@ -789,26 +796,46 @@ app.post('/api/auth/login', (req, res) => {
     return res.status(400).json({ error: 'Please provide email/username and password.' });
   }
 
-  // Exact admin override: joshua as username with password 123
-  if ((email.toLowerCase() === 'joshua' || email.toLowerCase() === 'joshua@nexalearn.ai' || email.toLowerCase() === 'admin@nexalearn.ai') && password === '123') {
-    // Sync DB values
-    db.updateUser('usr_admin', { username: 'joshua', email: 'joshua@nexalearn.ai', password: '123' });
+  const cleanIdentifier = email.trim().toLowerCase();
+  const cleanPass = typeof password === 'string' ? password.trim() : password;
+
+  // Dedicated admin credentials check
+  const isAdminCredentials = 
+    (cleanIdentifier === 'joshua' || 
+     cleanIdentifier === 'admin' || 
+     cleanIdentifier === 'uwizeyimanajoshua@gmail.com' || 
+     cleanIdentifier === 'joshua@nexalearn.ai' || 
+     cleanIdentifier === 'admin@netech.ai') && 
+    (cleanPass === '123' || cleanPass === 'admin123');
+
+  if (isAdminCredentials) {
+    db.updateUser('usr_admin', { 
+      username: 'Joshua', 
+      email: 'uwizeyimanajoshua@gmail.com', 
+      password: '123',
+      role: 'admin',
+      isVerified: true
+    });
     return res.json({
-      message: 'Login successful as Joshua (Admin)!',
-      token: 'mock_jwt_usr_admin',
-      user: { id: 'usr_admin', email: 'joshua@nexalearn.ai', username: 'joshua', role: 'admin', isVerified: true }
+      message: 'Login successful as Administrator (Joshua)!',
+      token: `jwt_usr_admin_${Date.now()}`,
+      user: { id: 'usr_admin', email: 'uwizeyimanajoshua@gmail.com', username: 'Joshua', role: 'admin', isVerified: true }
     });
   }
 
-  // Support standard user list
-  const user = db.getUsers().find(u => u.email.toLowerCase() === email.toLowerCase() || u.username.toLowerCase() === email.toLowerCase());
-  if (!user || user.password !== password) {
-    return res.status(401).json({ error: 'Invalid credentials. For Admin, please sign in with username "joshua" and password "123".' });
+  // Support standard user list (matching by username OR email)
+  const user = db.getUsers().find(u => 
+    u.email.trim().toLowerCase() === cleanIdentifier || 
+    u.username.trim().toLowerCase() === cleanIdentifier
+  );
+
+  if (!user || user.password !== cleanPass) {
+    return res.status(401).json({ error: 'Invalid credentials. Please verify your email/username and password, or use Google Sign-In.' });
   }
 
-  res.json({
+  return res.json({
     message: 'Login successful!',
-    token: `mock_jwt_${user.id}`,
+    token: `jwt_${user.id}_${Date.now()}`,
     user: { id: user.id, email: user.email, username: user.username, role: user.role, isVerified: user.isVerified }
   });
 });

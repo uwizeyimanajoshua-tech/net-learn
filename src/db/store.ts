@@ -43,7 +43,8 @@ async function runFirestore<T>(op: () => Promise<T>): Promise<T | null> {
   }
 }
 
-const STORE_PATH = process.env.VERCEL 
+const isServerless = !!(process.env.VERCEL || process.env.NOW_REGION || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT || process.env.NODE_ENV === 'production');
+const STORE_PATH = isServerless 
   ? path.join('/tmp', 'db_store.json') 
   : path.join(process.cwd(), 'db_store.json');
 
@@ -278,7 +279,12 @@ function saveDB(data: DatabaseSchema) {
   try {
     fs.writeFileSync(STORE_PATH, JSON.stringify(data, null, 2), 'utf-8');
   } catch (error) {
-    console.error('Error saving DB:', error);
+    try {
+      const fallbackPath = path.join('/tmp', 'db_store.json');
+      fs.writeFileSync(fallbackPath, JSON.stringify(data, null, 2), 'utf-8');
+    } catch (e) {
+      console.error('Error saving DB:', error, e);
+    }
   }
 }
 
