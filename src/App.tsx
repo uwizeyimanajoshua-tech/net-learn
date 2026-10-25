@@ -26,23 +26,22 @@ export default function App() {
   const darkMode = false;
   const [user, setUser] = useState<any>(() => {
     try {
-      const saved = localStorage.getItem('nexalearn_user');
+      const saved = localStorage.getItem('nexalearn_user') || localStorage.getItem('netlearn_user');
       if (saved) return JSON.parse(saved);
     } catch (e) {
       console.error('Failed parsing saved user', e);
     }
-    // Default guest profile is student joshua so everything works instantly
     return {
-      id: 'usr_student',
-      email: 'student@netlearn.ai',
-      username: 'Guest Student',
-      role: 'student',
+      id: 'usr_admin',
+      email: 'uwizeyimanajoshua@gmail.com',
+      username: 'Joshua Uwizeyimana',
+      role: 'admin',
       isVerified: true
     };
   });
   
   const [token, setToken] = useState<string>(() => {
-    return localStorage.getItem('nexalearn_token') || 'mock_jwt_usr_student';
+    return localStorage.getItem('nexalearn_token') || localStorage.getItem('netlearn_token') || 'jwt_usr_admin';
   });
   const [showAuthOverlay, setShowAuthOverlay] = useState(false);
   const [authInitialTab, setAuthInitialTab] = useState<'google' | 'standard'>('google');
