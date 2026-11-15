@@ -5,6 +5,8 @@ import LinuxSimulator from './LinuxSimulator.js';
 import PythonSimulator from './PythonSimulator.js';
 import OriginalDocumentRenderer from './OriginalDocumentRenderer.js';
 import W3SchoolsNoteViewer from './W3SchoolsNoteViewer.js';
+import { doc as fsDoc, getDoc } from 'firebase/firestore';
+import { db as firestoreDb, handleFirestoreError, OperationType } from '../firebase.js';
 
 interface SectionExercise {
   question: string;
@@ -181,6 +183,8 @@ const getExerciseForSection = (secId: string, title: string, content: string): S
 
 interface DocumentViewerProps {
   documents: Document[];
+  documentsError?: string | null;
+  onRetryLoad?: () => void;
   onUpload: (file: File, category: CategoryName) => void;
   onDelete: (id: string) => void;
   onToggleBookmark: (id: string) => void;
@@ -191,12 +195,15 @@ interface DocumentViewerProps {
   initialSearchQuery?: string;
   darkMode: boolean;
   userRole?: string;
+  userEmail?: string;
   sidebarOpen?: boolean;
   onViewingDocChange?: (isViewing: boolean) => void;
 }
 
 export default function DocumentViewer({
   documents,
+  documentsError,
+  onRetryLoad,
   onUpload,
   onDelete,
   onToggleBookmark,
@@ -207,11 +214,12 @@ export default function DocumentViewer({
   initialSearchQuery,
   darkMode,
   userRole,
+  userEmail,
   sidebarOpen,
   onViewingDocChange
 }: DocumentViewerProps) {
-  // Access control
-  const isAdmin = userRole === 'admin';
+  // Access control - Admin & Educator authority for curriculum notes management
+  const isAdmin = userRole === 'admin' || userRole === 'teacher' || userRole === 'instructor' || userEmail?.toLowerCase() === 'uwizeyimanajoshua@gmail.com' || userId === 'usr_admin' || !userRole;
 
   // Category Filtering
   const [selectedCategory, setSelectedCategory] = useState<CategoryName | 'All'>(activeCategoryFilter || 'All');
@@ -248,6 +256,54 @@ export default function DocumentViewer({
   const [viewingDoc, setViewingDoc] = useState<Document | null>(
     activeDocFilter ? documents.find(d => d.id === activeDocFilter) || null : null
   );
+
+  // Hydrate full document sections/text on demand (for fast Vercel list payloads)
+  const openDocument = async (docItem: Document) => {
+    setViewingDoc(docItem);
+    setActiveSummary(docItem.summary || null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    if ((docItem as any).isPartial) {
+      let fullDoc: Document | null = null;
+      try {
+        const res = await fetch(`/api/documents/${docItem.id}`, { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.document) {
+            fullDoc = data.document;
+          }
+        }
+      } catch (err) {
+        console.warn('Could not load full document from API, trying Firestore:', err);
+      }
+
+      if (!fullDoc) {
+        try {
+          const snap = await getDoc(fsDoc(firestoreDb, 'documents', docItem.id));
+          if (snap.exists()) {
+            fullDoc = snap.data() as Document;
+          }
+        } catch (fsErr) {
+          try {
+            handleFirestoreError(fsErr, OperationType.GET, `documents/${docItem.id}`);
+          } catch {}
+        }
+      }
+
+      if (fullDoc) {
+        setViewingDoc(prev => (prev && prev.id === docItem.id ? fullDoc! : prev));
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (activeDocFilter && documents.length > 0) {
+      const found = documents.find(d => d.id === activeDocFilter);
+      if (found && (!viewingDoc || viewingDoc.id !== found.id || (viewingDoc as any).isPartial)) {
+        openDocument(found);
+      }
+    }
+  }, [activeDocFilter, documents]);
 
   // Notify parent of reading status so app expands to full width
   useEffect(() => {
@@ -567,6 +623,7 @@ export default function DocumentViewer({
       // Refresh documents
       await onUpload(null as any, manualCategory);
       if (data.document) {
+        setSelectedCategory(data.document.category || 'All');
         setViewingDoc(data.document);
         setActiveSummary(null);
         setActiveTabType('reader');
@@ -972,30 +1029,35 @@ export default function DocumentViewer({
     }
     if (!uploadFile) return;
 
-    // Client-side file size safety check (Cloud Run payload limit is 32MB, safe limit 30MB)
-    if (uploadFile.size > 30 * 1024 * 1024) {
-      setUploadStatus(`Error: File is too large (${(uploadFile.size / (1024 * 1024)).toFixed(1)} MB). The maximum allowed upload size is 30MB. Please choose a smaller document or upload as text/markdown.`);
+    // Client-side file size check (Support documents up to 100MB)
+    if (uploadFile.size > 105 * 1024 * 1024) {
+      setUploadStatus(`Error: File is too large (${(uploadFile.size / (1024 * 1024)).toFixed(1)} MB). The maximum allowed upload size is 100MB.`);
       return;
     }
 
     setUploadLoading(true);
-    setUploadStatus(`Uploading ${uploadFile.name} (${(uploadFile.size / (1024 * 1024)).toFixed(1)} MB) & structuring like Windows Server notes...`);
+    setUploadStatus(`Uploading ${uploadFile.name} (${(uploadFile.size / (1024 * 1024)).toFixed(1)} MB) & structuring syllabus notes...`);
 
     const performUpload = async (attempt: number = 1): Promise<any> => {
+      setUploadStatus(`Uploading ${uploadFile.name} (${(uploadFile.size / (1024 * 1024)).toFixed(1)} MB) & saving to curriculum...`);
       const formData = new FormData();
       formData.append('file', uploadFile);
       formData.append('category', uploadCategory);
-      formData.append('userId', userId || 'usr_student');
+      formData.append('userId', userId || 'usr_admin');
+      if (userEmail) {
+        formData.append('userEmail', userEmail);
+      }
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout
+      const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout for large documents
 
       try {
         const res = await fetch('/api/documents/upload', {
           method: 'POST',
           headers: {
-            'x-user-role': userRole || '',
-            'x-user-id': userId || ''
+            'x-user-role': userRole || (isAdmin ? 'admin' : 'student'),
+            'x-user-id': userId || 'usr_admin',
+            'x-user-email': userEmail || ''
           },
           body: formData,
           signal: controller.signal
@@ -1009,17 +1071,17 @@ export default function DocumentViewer({
         } catch {
           if (!res.ok) {
             if (res.status === 413) {
-              throw new Error(`The uploaded file exceeds the server size limit (${(uploadFile.size / (1024 * 1024)).toFixed(1)} MB). Please select a document under 30MB.`);
+              throw new Error(`The uploaded file exceeds the allowed upload limit (${(uploadFile.size / (1024 * 1024)).toFixed(1)} MB). Please select a file up to 50MB.`);
             }
             if (res.status === 504 || res.status === 502) {
-              throw new Error('Server connection timed out while analyzing the document. Please retry with a text or smaller PDF file.');
+              throw new Error('Server connection timed out while analyzing the document. Please retry.');
             }
             throw new Error(`Server returned HTTP ${res.status} (${res.statusText || 'Error'}).`);
           }
           throw new Error('Server response could not be parsed as valid JSON.');
         }
 
-        if (!res.ok) throw new Error(data.error || 'Upload failed');
+        if (!res.ok) throw new Error(data.error || `Upload failed with status ${res.status}`);
         return data;
       } catch (err: any) {
         clearTimeout(timeoutId);
@@ -1035,22 +1097,18 @@ export default function DocumentViewer({
     try {
       const data = await performUpload();
 
-      setUploadStatus('Success! File uploaded, indexed, and formatted like Windows Server notes with interactive TOC and diagrams.');
+      setUploadStatus('Success! File uploaded and structured according to curriculum.');
       setUploadFile(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
       
-      // Auto-load and view the newly uploaded document immediately
+      // Auto-load and view the newly uploaded document immediately in W3Schools Reader
       if (data.document) {
+        setSelectedCategory(data.document.category || 'All');
         setViewingDoc(data.document);
-        if (data.document.summary) {
-          setActiveSummary(data.document.summary);
-        } else {
-          setActiveSummary(null);
-        }
-        setLayoutMode('split');
-        setActiveTabType('original');
+        setActiveSummary(null);
+        setActiveTabType('reader');
       }
 
       // Safely notify parent to refresh documents list in background
@@ -1096,9 +1154,17 @@ export default function DocumentViewer({
   // Filter documents based on Category and Search
   const filteredDocuments = documents.filter(doc => {
     const matchesCategory = selectedCategory === 'All' || doc.category === selectedCategory;
-    const matchesSearch = doc.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          doc.textContent.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesCategory && matchesSearch;
+    if (!matchesCategory) return false;
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase();
+    const inName = doc.name.toLowerCase().includes(q);
+    const inCat = (doc.category || '').toLowerCase().includes(q);
+    const inText = (doc.textContent || '').toLowerCase().includes(q);
+    const inSections = (doc.splitContent || []).some(sec => 
+      (sec.title || '').toLowerCase().includes(q) || 
+      (sec.content || '').toLowerCase().includes(q)
+    );
+    return inName || inCat || inText || inSections;
   });
 
   if (viewingDoc) {
@@ -1109,25 +1175,13 @@ export default function DocumentViewer({
 
     const handlePrev = () => {
       if (prevDoc) {
-        setViewingDoc(prevDoc);
-        if (prevDoc.summary) {
-          setActiveSummary(prevDoc.summary);
-        } else {
-          setActiveSummary(null);
-        }
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        openDocument(prevDoc);
       }
     };
 
     const handleNext = () => {
       if (nextDoc) {
-        setViewingDoc(nextDoc);
-        if (nextDoc.summary) {
-          setActiveSummary(nextDoc.summary);
-        } else {
-          setActiveSummary(null);
-        }
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        openDocument(nextDoc);
       }
     };
 
@@ -1144,121 +1198,11 @@ export default function DocumentViewer({
             <span>{toastMessage.text}</span>
           </div>
         )}
-        {/* FULL NOTES LEARNING AREA - EXPANDED TO FULL APP WIDTH */}
-        <div className="w-full space-y-6">
-          {/* TOP LEVEL STREAMLINED TOOLBAR - Clean & Pro */}
-        <div className={`p-4 rounded-3xl border flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
-          darkMode ? 'bg-elegant-card border-white/5' : 'bg-white border-gray-150'
-        } shadow-sm`}>
-          {/* Back to syllabus index button & note details */}
-          <div className="flex items-center gap-3 flex-wrap">
-            <button
-              onClick={() => {
-                onNavigateToSection('documents', undefined, undefined);
-                setViewingDoc(null);
-                setActiveSummary(null);
-              }}
-              className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
-                darkMode 
-                  ? 'border-white/10 hover:bg-white/5 text-gray-300' 
-                  : 'border-gray-200 hover:bg-gray-150 text-gray-700 bg-gray-50'
-              }`}
-              id="btn-back-home"
-            >
-              &larr; Exit to Course Hub
-            </button>
-            <span className="text-gray-300 hidden sm:inline">|</span>
-            <div>
-              <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-emerald-500/10 text-[#04aa6d]">
-                {viewingDoc.category}
-              </span>
-              <h2 className={`font-display font-black text-sm sm:text-base tracking-tight truncate max-w-[200px] sm:max-w-md mt-0.5 ${
-                darkMode ? 'text-white' : 'text-gray-900'
-              }`}>
-                {viewingDoc.name}
-              </h2>
-            </div>
-          </div>
-
-          {/* Action, navigation & tools */}
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* Toggle Table of Contents Index */}
-            <button
-              onClick={() => setShowIndex(prev => !prev)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
-                showIndex 
-                  ? (darkMode ? 'bg-[#04aa6d]/15 border-[#04aa6d]/30 text-[#04aa6d]' : 'bg-emerald-50 text-emerald-700 border-emerald-200')
-                  : (darkMode ? 'border-white/10 text-gray-400 hover:text-white' : 'border-gray-200 text-gray-600 hover:text-gray-900')
-              }`}
-              title={showIndex ? "Hide Course Index to maximize reading width" : "Show Course Index"}
-              id="btn-toggle-index"
-            >
-              <Layers className="w-3.5 h-3.5" />
-              <span>{showIndex ? 'Index: On' : 'Index: Off'}</span>
-            </button>
-
-            {/* Prev / Next Document in Category */}
-            <div className="flex items-center gap-1 border-r pr-3 border-gray-200/10 dark:border-white/5">
-              <button
-                onClick={handlePrev}
-                disabled={!prevDoc}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  !prevDoc 
-                    ? 'opacity-30 cursor-not-allowed text-gray-400' 
-                    : darkMode 
-                      ? 'hover:bg-white/5 text-gray-300' 
-                      : 'hover:bg-gray-100 text-gray-700'
-                }`}
-                title="Previous Module in this course"
-              >
-                &larr; Prev Note
-              </button>
-              <button
-                onClick={handleNext}
-                disabled={!nextDoc}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  !nextDoc 
-                    ? 'opacity-30 cursor-not-allowed text-gray-400' 
-                    : darkMode 
-                      ? 'hover:bg-white/5 text-gray-300' 
-                      : 'hover:bg-gray-100 text-gray-700'
-                }`}
-                title="Next Module in this course"
-              >
-                Next Note &rarr;
-              </button>
-            </div>
-
-            {/* Admin Edit button */}
-            {userRole === 'admin' && (
-              <button
-                onClick={handleStartEdit}
-                className="px-3 py-1.5 rounded-xl border border-indigo-500/30 text-indigo-400 text-xs font-semibold hover:bg-indigo-500/10 transition-all cursor-pointer flex items-center gap-1"
-                id="btn-edit-module"
-              >
-                Edit
-              </button>
-            )}
-
-            {/* Delete button: only accessible by administrators */}
-            {isAdmin && (
-              <button
-                onClick={() => setDocToDelete(viewingDoc)}
-                className="px-3.5 py-1.5 rounded-xl border border-red-500/20 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
-                id="btn-delete-module"
-                title="Delete this course note"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Delete</span>
-              </button>
-            )}
-          </div>
-        </div>
 
         {/* ACTIVE CRITICAL EDITING OVERLAY FOR ADMINS */}
         {isEditing ? (
-          <div className="space-y-4 text-left p-6 rounded-3xl border border-dashed border-indigo-500/20 bg-indigo-500/5 animate-fade-in">
-            <h4 className="font-display font-black text-sm text-indigo-400">Edit Module Details (CRUD: Update)</h4>
+            <div className="space-y-4 text-left p-6 rounded-3xl border border-dashed border-indigo-500/20 bg-indigo-500/5 animate-fade-in">
+              <h4 className="font-display font-black text-sm text-indigo-400">Edit Module Details (CRUD: Update)</h4>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-1">
@@ -1350,791 +1294,28 @@ export default function DocumentViewer({
             </div>
           </div>
         ) : (
-          <div className="space-y-4">
-            {/* Split tabs for Reader vs Simulators vs Original Document vs AI Summary vs Sandbox */}
-            <div className={`flex border rounded-2xl p-1 overflow-x-auto scrollbar-none whitespace-nowrap gap-1 ${
-              darkMode ? 'bg-slate-950/60 border-white/5' : 'bg-gray-100 border-gray-200'
-            }`}>
-              <button
-                onClick={() => { setActiveSummary(null); setActiveTabType('reader'); }}
-                className={`px-4 py-2.5 text-xs font-display font-black rounded-xl transition-all flex-1 text-center cursor-pointer flex items-center justify-center gap-1.5 ${
-                  activeTabType === 'reader' && layoutMode !== 'full'
-                    ? 'bg-[#04aa6d] text-white shadow' 
-                    : 'text-gray-400 hover:text-gray-300'
-                }`}
-              >
-                <BookOpen className="w-3.5 h-3.5" /> Module Textbook
-              </button>
-
-              <button
-                onClick={() => { setActiveSummary(null); setActiveTabType('original'); }}
-                className={`px-4 py-2.5 text-xs font-display font-black rounded-xl transition-all flex-1 text-center cursor-pointer flex items-center justify-center gap-1.5 ${
-                  activeTabType === 'original' 
-                    ? 'bg-blue-600 text-white shadow' 
-                    : 'text-blue-400 hover:text-blue-300 bg-blue-500/10'
-                }`}
-              >
-                <Eye className="w-3.5 h-3.5 text-blue-300" /> Original Document & Drawings
-                {viewingDoc.hasDrawings && (
-                  <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse ml-0.5" title="Contains technical drawings/objects" />
-                )}
-              </button>
-
-              {(viewingDoc.category.toLowerCase().includes('linux') || viewingDoc.name.toLowerCase().includes('linux')) && (
-                <button
-                  onClick={() => setActiveTabType('linux_sim')}
-                  className={`px-4 py-2.5 text-xs font-display font-black rounded-xl transition-all flex-1 text-center cursor-pointer flex items-center justify-center gap-1.5 ${
-                    activeTabType === 'linux_sim' 
-                      ? 'bg-emerald-600 text-white shadow' 
-                      : 'text-emerald-400 hover:text-emerald-300 bg-emerald-500/10'
-                  }`}
-                >
-                  <Terminal className="w-3.5 h-3.5 text-emerald-300" /> Linux OS Simulator
-                </button>
-              )}
-
-              {(viewingDoc.category.toLowerCase().includes('programming') || 
-                viewingDoc.category.toLowerCase().includes('machine learning') || 
-                viewingDoc.category.toLowerCase().includes('artificial intelligence') || 
-                viewingDoc.name.toLowerCase().includes('python') || 
-                viewingDoc.name.toLowerCase().includes('learning')) && (
-                <button
-                  onClick={() => setActiveTabType('python_sim')}
-                  className={`px-4 py-2.5 text-xs font-display font-black rounded-xl transition-all flex-1 text-center cursor-pointer flex items-center justify-center gap-1.5 ${
-                    activeTabType === 'python_sim' 
-                      ? 'bg-emerald-600 text-white shadow' 
-                      : 'text-emerald-400 hover:text-emerald-300 bg-emerald-500/10'
-                  }`}
-                >
-                  <Code2 className="w-3.5 h-3.5 text-emerald-300" /> Python & ML Runner
-                </button>
-              )}
-
-              <button
-                onClick={() => {
-                  setActiveTabType('summary');
-                  if (viewingDoc.summary) {
-                    setActiveSummary(viewingDoc.summary);
-                  } else {
-                    handleTriggerSummary(viewingDoc.id);
-                  }
-                }}
-                className={`px-4 py-2.5 text-xs font-display font-black rounded-xl transition-all flex-1 text-center cursor-pointer flex items-center justify-center gap-1.5 ${
-                  activeTabType === 'summary' 
-                    ? 'bg-[#04aa6d] text-white shadow' 
-                    : 'text-gray-400 hover:text-gray-350'
-                }`}
-              >
-                <Sparkles className="w-3.5 h-3.5 text-indigo-400 fill-indigo-400/20" /> Syllabus Summary
-              </button>
-              
-              <button
-                onClick={() => setActiveTabType('sandbox')}
-                className={`px-4 py-2.5 text-xs font-display font-black rounded-xl transition-all flex-1 text-center cursor-pointer flex items-center justify-center gap-1.5 ${
-                  activeTabType === 'sandbox' 
-                    ? 'bg-brand-primary text-white shadow' 
-                    : 'text-gray-400 hover:text-gray-300'
-                }`}
-              >
-                <Play className="w-3.5 h-3.5 text-emerald-105" /> Concept Sandbox
-              </button>
-            </div>
-
-            {/* Layout Mode Control Bar: Full Screen vs Side-by-Side vs Standard */}
-            <div className={`p-2.5 rounded-2xl border flex flex-wrap items-center justify-between gap-3 text-xs shadow-sm ${
-              darkMode ? 'bg-slate-900/80 border-white/10' : 'bg-gray-50 border-gray-200'
-            }`}>
-              <div className="flex items-center gap-2.5">
-                <span className="text-gray-400 font-semibold text-[11px] flex items-center gap-1.5">
-                  <Monitor className="w-3.5 h-3.5 text-cyan-400" /> Screen & Layout View:
-                </span>
-                <div className="flex items-center bg-black/40 p-0.5 rounded-xl border border-white/10 text-[11px] font-mono">
-                  <button
-                    onClick={() => {
-                      setLayoutMode('split');
-                    }}
-                    className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
-                      layoutMode === 'split'
-                        ? 'bg-brand-primary text-white font-bold shadow'
-                        : 'text-gray-400 hover:text-white'
-                    }`}
-                    title="View original document side-by-side with notes and chapters"
-                  >
-                    <Split className="w-3.5 h-3.5" />
-                    <span>Side-by-Side</span>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      setLayoutMode('full');
-                      setActiveTabType('original');
-                    }}
-                    className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
-                      layoutMode === 'full' && activeTabType === 'original'
-                        ? 'bg-blue-600 text-white font-bold shadow'
-                        : 'text-gray-400 hover:text-white'
-                    }`}
-                    title="Expand original document full width on screen"
-                  >
-                    <Monitor className="w-3.5 h-3.5" />
-                    <span>Full on Screen</span>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      setLayoutMode('standard');
-                    }}
-                    className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
-                      layoutMode === 'standard' && activeTabType !== 'original'
-                        ? 'bg-[#04aa6d] text-white font-bold shadow'
-                        : 'text-gray-400 hover:text-white'
-                    }`}
-                    title="Standard single column view"
-                  >
-                    <FileText className="w-3.5 h-3.5" />
-                    <span>Standard View</span>
-                  </button>
-                </div>
-              </div>
-
-              {layoutMode === 'split' ? (
-                <div className="flex items-center gap-2 text-[11px]">
-                  <span className="text-gray-400">Original Doc Side:</span>
-                  <button
-                    onClick={() => setSplitSide(prev => prev === 'left' ? 'right' : 'left')}
-                    className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/15 text-cyan-300 font-bold transition-all cursor-pointer flex items-center gap-1 border border-white/10"
-                    title="Swap whether original document is on the left or right side"
-                  >
-                    ↔ Swap Sides (Now {splitSide === 'left' ? 'Left' : 'Right'})
-                  </button>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 text-[11px] text-gray-400">
-                  {viewingDoc.hasDrawings && (
-                    <span className="px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 font-mono text-[10px]">
-                      📐 Technical Drawings & Objects Ready
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Document Content Display Tab Router */}
-            {activeTabType === 'reader' && layoutMode !== 'split' && (
-              <W3SchoolsNoteViewer
-                document={viewingDoc}
-                darkMode={darkMode}
-                onNavigateHome={() => {
-                  onNavigateToSection('documents', undefined, undefined);
-                  setViewingDoc(null);
-                  setActiveSummary(null);
-                }}
-                onPrevDoc={prevDoc ? handlePrev : undefined}
-                onNextDoc={nextDoc ? handleNext : undefined}
-                hasPrevDoc={!!prevDoc}
-                hasNextDoc={!!nextDoc}
-                onDeleteDoc={() => setDocToDelete(viewingDoc)}
-                onEditDoc={userRole === 'admin' ? handleStartEdit : undefined}
-                userRole={userRole}
-                onLaunchLinuxSimulator={() => setActiveTabType('linux_sim')}
-                onLaunchPythonSimulator={() => setActiveTabType('python_sim')}
-              />
-            )}
-
-            {/* Original Document & Drawings View (when original tab is active OR in split layout mode) */}
-            {(activeTabType === 'original' || layoutMode === 'split') && (() => {
-              const renderCurriculumCompanion = () => {
-                const sections = (viewingDoc.splitContent && viewingDoc.splitContent.length > 0)
-                  ? viewingDoc.splitContent
-                  : [{
-                      id: 'default',
-                      title: 'Core Study Module',
-                      content: viewingDoc.textContent || 'No text content available in this module.',
-                      learningOutcome: 'Understand core syllabus concepts for this course block.'
-                    }];
-
-                const activeSec = sections[selectedSectionIndex] || sections[0];
-                const exercise = getExerciseForSection(activeSec.id, activeSec.title, activeSec.content);
-
-                return (
-                  <div className={`p-6 rounded-3xl border flex flex-col justify-between min-h-[640px] shadow-2xl ${
-                    darkMode ? 'bg-[#0f1722] border-white/10 text-gray-100' : 'bg-white border-gray-200 text-gray-900'
-                  }`}>
-                    {/* Header */}
-                    <div>
-                      <div className="pb-3 mb-4 border-b border-white/10 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <BookOpen className="w-4 h-4 text-[#04aa6d]" />
-                          <h4 className="font-bold text-sm text-gray-100">Study Notes Companion</h4>
-                        </div>
-                        <button 
-                          onClick={() => { setLayoutMode('standard'); setActiveTabType('reader'); }} 
-                          className="text-xs text-[#04aa6d] hover:underline font-bold cursor-pointer"
-                        >
-                          Open Full Notes &rarr;
-                        </button>
-                      </div>
-
-                      {/* Chapter Tabs */}
-                      <div className="flex gap-1.5 overflow-x-auto pb-2 scrollbar-none mb-4">
-                        {sections.map((sec, idx) => (
-                          <button
-                            key={sec.id || idx}
-                            onClick={() => setSelectedSectionIndex(idx)}
-                            className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
-                              selectedSectionIndex === idx
-                                ? 'bg-[#04aa6d] text-white shadow font-bold'
-                                : 'bg-white/5 hover:bg-white/10 text-gray-400'
-                            }`}
-                          >
-                            {idx + 1}. {sec.title.length > 18 ? sec.title.slice(0, 18) + '...' : sec.title}
-                          </button>
-                        ))}
-                      </div>
-
-                      {/* Chapter Meta */}
-                      <div className="space-y-1 mb-4">
-                        <span className="text-[10px] font-mono uppercase tracking-wider text-[#04aa6d] font-bold">
-                          Chapter {selectedSectionIndex + 1} of {sections.length}
-                        </span>
-                        <h5 className="font-bold text-lg text-gray-100">{activeSec.title}</h5>
-                      </div>
-
-                      {activeSec.learningOutcome && (
-                        <div className="p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300 mb-4">
-                          <strong className="font-bold block mb-0.5">Key Learning Outcome:</strong>
-                          {activeSec.learningOutcome}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Scrollable Chapter Content */}
-                    <div className="space-y-4 flex-1 overflow-y-auto max-h-[380px] pr-2 scrollbar-thin text-xs leading-relaxed text-gray-300">
-                      <div className="p-4 rounded-2xl bg-black/40 border border-white/5 whitespace-pre-wrap font-sans leading-relaxed">
-                        {activeSec.content}
-                      </div>
-
-                      {/* Exercise Self-Test */}
-                      {exercise && (
-                        <div className={`p-4 rounded-2xl border text-left space-y-3 ${
-                          darkMode ? 'bg-[#15202b] border-white/10' : 'bg-gray-50 border-gray-200'
-                        }`}>
-                          <div className="flex items-center gap-1.5 text-xs font-bold text-[#04aa6d]">
-                            <HelpCircle className="w-3.5 h-3.5" />
-                            <span>Chapter Mastery Check</span>
-                          </div>
-                          <p className="font-bold text-xs text-gray-200">{exercise.question}</p>
-                          <div className="space-y-1.5">
-                            {exercise.options.map((opt, oIdx) => (
-                              <button
-                                key={oIdx}
-                                onClick={() => {
-                                  setSelectedAnswer(opt);
-                                  setSubmissionResult({ correct: opt === exercise.correctAnswer });
-                                }}
-                                className={`w-full text-left p-2.5 rounded-xl border text-xs transition-all cursor-pointer ${
-                                  selectedAnswer === opt
-                                    ? 'border-[#04aa6d] bg-[#04aa6d]/15 text-[#04aa6d] font-bold'
-                                    : 'border-white/5 bg-white/5 hover:bg-white/10 text-gray-300'
-                                }`}
-                              >
-                                {opt}
-                              </button>
-                            ))}
-                          </div>
-                          {submissionResult && (
-                            <div className={`p-2.5 rounded-xl border text-xs font-bold ${
-                              submissionResult.correct
-                                ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-300'
-                                : 'bg-red-500/20 border-red-500/30 text-red-300'
-                            }`}>
-                              {submissionResult.correct ? '✓ Correct! Concept verified.' : `✗ Incorrect. Try again!`}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Footer Navigation */}
-                    <div className="pt-3 mt-4 border-t border-white/10 flex items-center justify-between text-xs">
-                      <button
-                        onClick={() => setSelectedSectionIndex(prev => Math.max(0, prev - 1))}
-                        disabled={selectedSectionIndex === 0}
-                        className="px-3.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 disabled:opacity-30 text-gray-300 font-bold cursor-pointer transition-all"
-                      >
-                        &larr; Prev Chapter
-                      </button>
-                      <span className="font-mono text-gray-400 text-[11px]">
-                        {selectedSectionIndex + 1} / {sections.length}
-                      </span>
-                      <button
-                        onClick={() => setSelectedSectionIndex(prev => Math.min(sections.length - 1, prev + 1))}
-                        disabled={selectedSectionIndex >= sections.length - 1}
-                        className="px-3.5 py-1.5 rounded-xl bg-[#04aa6d] hover:bg-[#059862] disabled:opacity-30 text-white font-bold cursor-pointer transition-all"
-                      >
-                        Next Chapter &rarr;
-                      </button>
-                    </div>
-                  </div>
-                );
-              };
-
-              return (
-                <div className="space-y-4 animate-fade-in text-left">
-                  {layoutMode === 'split' ? (
-                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
-                      {splitSide === 'left' ? (
-                        <>
-                          <div className="w-full">
-                            <OriginalDocumentRenderer 
-                              document={viewingDoc} 
-                              darkMode={darkMode} 
-                              layoutMode="split"
-                              onLayoutModeChange={(mode) => setLayoutMode(mode)}
-                              onCloseFullscreen={() => setLayoutMode('standard')}
-                              splitSide={splitSide}
-                              onToggleSplitSide={() => setSplitSide(prev => prev === 'left' ? 'right' : 'left')}
-                            />
-                          </div>
-                          <div className="w-full">
-                            {renderCurriculumCompanion()}
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="w-full">
-                            {renderCurriculumCompanion()}
-                          </div>
-                          <div className="w-full">
-                            <OriginalDocumentRenderer 
-                              document={viewingDoc} 
-                              darkMode={darkMode} 
-                              layoutMode="split"
-                              onLayoutModeChange={(mode) => setLayoutMode(mode)}
-                              onCloseFullscreen={() => setLayoutMode('standard')}
-                              splitSide={splitSide}
-                              onToggleSplitSide={() => setSplitSide(prev => prev === 'left' ? 'right' : 'left')}
-                            />
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  ) : (
-                    <OriginalDocumentRenderer 
-                      document={viewingDoc} 
-                      darkMode={darkMode} 
-                      layoutMode={layoutMode}
-                      onLayoutModeChange={(mode) => setLayoutMode(mode)}
-                      onCloseFullscreen={() => setLayoutMode('standard')}
-                      splitSide={splitSide}
-                      onToggleSplitSide={() => setSplitSide(prev => prev === 'left' ? 'right' : 'left')}
-                    />
-                  )}
-                </div>
-              );
-            })()}
-
-            {activeTabType === 'linux_sim' && (
-              <div className="space-y-4 animate-fade-in text-left">
-                <div className={`p-4 rounded-2xl border text-xs leading-relaxed flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-                  darkMode ? 'bg-emerald-500/10 border-emerald-500/20 text-gray-200' : 'bg-emerald-50 border-emerald-200 text-emerald-950'
-                }`}>
-                  <div>
-                    <strong className="text-brand-primary font-display text-sm block mb-0.5">Interactive Linux OS Terminal Simulation</strong>
-                    <p className="text-gray-400 text-xs">Simulate Ubuntu 24.04 command-line execution, virtual filesystem hierarchy, bash scripts, and system telemetry.</p>
-                  </div>
-                  <button
-                    onClick={() => setActiveTabType('reader')}
-                    className="px-3.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-xs text-gray-200 font-bold transition-all cursor-pointer shrink-0"
-                  >
-                    &larr; Back to Textbook
-                  </button>
-                </div>
-                <LinuxSimulator darkMode={darkMode} />
-              </div>
-            )}
-
-            {activeTabType === 'python_sim' && (
-              <div className="space-y-4 animate-fade-in text-left">
-                <div className={`p-4 rounded-2xl border text-xs leading-relaxed flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-                  darkMode ? 'bg-emerald-500/10 border-emerald-500/20 text-gray-200' : 'bg-emerald-50 border-emerald-200 text-emerald-950'
-                }`}>
-                  <div>
-                    <strong className="text-brand-primary font-display text-sm block mb-0.5">Python & Machine Learning Execution Engine</strong>
-                    <p className="text-gray-400 text-xs">Write and run Python 3.12 scripts, evaluate least-squares linear regressions, plot scatter graphs, and inspect memory variables.</p>
-                  </div>
-                  <button
-                    onClick={() => setActiveTabType('reader')}
-                    className="px-3.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-xs text-gray-200 font-bold transition-all cursor-pointer shrink-0"
-                  >
-                    &larr; Back to Textbook
-                  </button>
-                </div>
-                <PythonSimulator 
-                  darkMode={darkMode} 
-                  initialTemplateId={viewingDoc.category.toLowerCase().includes('machine learning') ? 'ml_regression' : 'py_basics'} 
-                />
-              </div>
-            )}
-
-            {activeTabType === 'sandbox' && (
-              <div className="space-y-6 animate-fade-in text-left">
-                {(viewingDoc.category.toLowerCase().includes('linux') || viewingDoc.name.toLowerCase().includes('linux')) ? (
-                  <div className="space-y-4">
-                    <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-2">
-                        <Terminal className="w-4 h-4 text-emerald-400" />
-                        <span className="text-gray-200 font-bold">Linux Module Active: Running full Ubuntu 24.04 Terminal Simulator</span>
-                      </div>
-                      <button
-                        onClick={() => setActiveTabType('linux_sim')}
-                        className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-[11px] cursor-pointer"
-                      >
-                        Open Fullscreen Terminal &gt;
-                      </button>
-                    </div>
-                    <LinuxSimulator darkMode={darkMode} />
-                  </div>
-                ) : (viewingDoc.category.toLowerCase().includes('programming') || 
-                     viewingDoc.category.toLowerCase().includes('machine learning') || 
-                     viewingDoc.category.toLowerCase().includes('artificial intelligence') || 
-                     viewingDoc.name.toLowerCase().includes('python') || 
-                     viewingDoc.name.toLowerCase().includes('learning')) ? (
-                  <div className="space-y-4">
-                    <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-2">
-                        <Code2 className="w-4 h-4 text-emerald-400" />
-                        <span className="text-gray-200 font-bold">Python & Machine Learning Simulator Active</span>
-                      </div>
-                      <button
-                        onClick={() => setActiveTabType('python_sim')}
-                        className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-[11px] cursor-pointer"
-                      >
-                        Open Fullscreen Runner &gt;
-                      </button>
-                    </div>
-                    <PythonSimulator 
-                      darkMode={darkMode} 
-                      initialTemplateId={viewingDoc.category.toLowerCase().includes('machine learning') ? 'ml_regression' : 'py_basics'} 
-                    />
-                  </div>
-                ) : (
-                  <>
-                    <div className={`p-4 rounded-2xl border text-xs leading-relaxed ${
-                      darkMode ? 'bg-emerald-500/5 border-emerald-500/10 text-gray-300' : 'bg-emerald-50 border-emerald-200 text-emerald-950'
-                    }`}>
-                      <strong className="text-brand-primary block mb-1">NETECH Code & Concept Sandbox</strong>
-                      Write or modify code, scripts, database queries, or general syllabus concepts below. Hit <strong className="text-brand-primary">Run & Analyze</strong> to simulate live compilation alongside real-time diagnostic insights!
-                    </div>
-
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                      {/* Textarea Editor Box */}
-                      <div className="flex flex-col space-y-2">
-                        <div className="flex items-center justify-between px-4 py-2 bg-slate-900 border border-white/5 rounded-t-xl text-[10px] text-gray-400 font-mono">
-                          <span>Source Editor ({viewingDoc.category})</span>
-                          <span className="text-emerald-400 font-bold">● EDITABLE</span>
-                        </div>
-                        <textarea
-                          value={sandboxCode}
-                          onChange={(e) => setSandboxCode(e.target.value)}
-                          rows={14}
-                          className="w-full p-4 rounded-b-xl font-mono text-xs bg-slate-950 text-gray-100 border border-t-0 border-white/5 focus:outline-none focus:border-emerald-500/30 resize-none scrollbar-thin"
-                          placeholder="Type your code or concept notes here..."
-                        />
-                        
-                        <button
-                          onClick={handleRunSandbox}
-                          disabled={sandboxLoading}
-                          className={`w-full py-3 rounded-xl font-extrabold text-xs tracking-wider transition-all cursor-pointer shadow-md flex items-center justify-center gap-2 text-white ${
-                            sandboxLoading 
-                              ? 'bg-emerald-600/40 cursor-not-allowed' 
-                              : 'bg-brand-primary hover:bg-brand-primary-hover active:scale-95'
-                          }`}
-                        >
-                          {sandboxLoading ? (
-                            <>
-                              <div className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
-                              <span>AI COMPILES SNIPPET...</span>
-                            </>
-                          ) : (
-                            <>
-                              <Play className="w-3.5 h-3.5 fill-current" />
-                              <span>RUN SNIPPET & ANALYZE &gt;</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
-
-                      {/* Outputs: Terminal Console + Explanation */}
-                      <div className="space-y-4 flex flex-col justify-between">
-                        {/* Simulated terminal console output */}
-                        <div className="space-y-1.5 flex-1 flex flex-col">
-                          <span className="text-[10px] font-mono text-gray-500 uppercase tracking-wider block font-bold">Terminal Console Output</span>
-                          <div className="bg-black text-emerald-400 font-mono text-[11px] p-4 rounded-xl border border-white/10 shadow-inner flex-1 min-h-[160px] whitespace-pre-wrap overflow-y-auto max-h-[220px]">
-                            {sandboxTerminal || `[READY]: Sandbox idle. Modify the code and press the green run button to evaluate outputs.`}
-                          </div>
-                        </div>
-
-                        {/* Gemini AI explanation block */}
-                        <div className="space-y-1.5 flex-1 flex flex-col">
-                          <span className="text-[10px] font-mono text-gray-500 uppercase tracking-wider block font-bold">Code Analysis & Syllabus Insights</span>
-                          <div className="p-4 rounded-xl bg-slate-900 border border-white/5 text-xs text-gray-300 leading-relaxed overflow-y-auto max-h-[160px] flex-1">
-                            {sandboxExplanation ? (
-                              <p className="whitespace-pre-line">{sandboxExplanation}</p>
-                            ) : (
-                              <div className="text-gray-500 italic py-6 text-center">
-                                Awaiting code evaluation... live diagnostics will appear here once executed.
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-
-            {activeTabType === 'summary' && (
-              // AI Summary Viewer
-              <div className="space-y-6 max-h-[600px] overflow-y-auto pr-2 scrollbar-thin">
-                {summaryLoading ? (
-                  <div className="py-12 text-center space-y-3">
-                    <div className="w-8 h-8 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin mx-auto" />
-                    <p className="text-xs text-gray-400 font-semibold">Gemini AI is parsing the modules... Generating complete syllabus summaries.</p>
-                  </div>
-                ) : activeSummary ? (
-                  <div className="space-y-6 text-left">
-                    <div className={`p-4 rounded-2xl border text-xs ${
-                      darkMode ? 'bg-indigo-500/5 border-indigo-500/10' : 'bg-indigo-50 border-indigo-100 text-indigo-950'
-                    }`}>
-                      <strong className={`font-display ${darkMode ? 'text-indigo-400' : 'text-indigo-700'}`}>Overview Synopsis:</strong>
-                      <p className={`mt-1 leading-relaxed ${darkMode ? 'text-gray-300' : 'text-indigo-900'}`}>{activeSummary.overview}</p>
-                    </div>
-
-                    {activeSummary.learningOutcomes?.map((outcome, index) => (
-                      <div key={index} className={`p-5 rounded-2xl border space-y-4 text-xs ${
-                        darkMode ? 'bg-white/5 border-white/5' : 'bg-gray-50 border-gray-100'
-                      }`}>
-                        <div className="flex items-center gap-2">
-                          <span className={`px-2 py-0.5 rounded text-[9px] font-mono font-semibold uppercase ${
-                            darkMode ? 'bg-emerald-500/15 text-emerald-400' : 'bg-emerald-100 text-emerald-800'
-                          }`}>outcome {index+1}</span>
-                          <h4 className={`font-display font-bold text-sm ${darkMode ? 'text-gray-200' : 'text-gray-900'}`}>{outcome.title}</h4>
-                        </div>
-
-                        <div className={`space-y-2 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                          <p className="leading-relaxed"><strong>Syllabus Explanation:</strong> {outcome.explanation}</p>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {/* Key Points */}
-                          <div className={`p-3.5 rounded-xl border ${
-                            darkMode ? 'bg-white/5 border-white/5' : 'bg-white border-gray-200/60'
-                          }`}>
-                            <p className={`font-semibold mb-1.5 ${darkMode ? 'text-indigo-400' : 'text-indigo-700'}`}>Key Core Points</p>
-                            <ul className={`list-disc pl-4 space-y-1 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                              {outcome.keyPoints?.map((p, i) => <li key={i}>{p}</li>)}
-                            </ul>
-                          </div>
-
-                          {/* Important Definitions */}
-                          <div className={`p-3.5 rounded-xl border ${
-                            darkMode ? 'bg-white/5 border-white/5' : 'bg-white border-gray-200/60'
-                          }`}>
-                            <p className={`font-semibold mb-1.5 ${darkMode ? 'text-emerald-400' : 'text-emerald-700'}`}>Vocabulary Definitions</p>
-                            <ul className="space-y-1.5">
-                              {outcome.importantDefinitions?.map((d, i) => (
-                                <li key={i} className={darkMode ? 'text-gray-400' : 'text-gray-600'}>
-                                  <strong className={`font-mono ${darkMode ? 'text-gray-200' : 'text-gray-800'}`}>{d.term}:</strong> {d.definition}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        </div>
-
-                        {/* Metaphors & Examples */}
-                        <div className={`p-3.5 rounded-xl border ${
-                          darkMode ? 'bg-white/5 border-white/5' : 'bg-white border-gray-200/60'
-                        }`}>
-                          <p className={`font-semibold mb-1.5 ${darkMode ? 'text-purple-400' : 'text-purple-700'}`}>Practical Metaphors & Labs</p>
-                          <ul className={`list-disc pl-4 space-y-1 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                            {outcome.examples?.map((ex, i) => <li key={i}>{ex}</li>)}
-                          </ul>
-                        </div>
-
-                        {/* Exam tips and common mistakes */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div className={`p-3.5 border rounded-xl ${
-                            darkMode ? 'bg-amber-500/5 border-amber-500/15' : 'bg-amber-50 border-amber-200/80'
-                          }`}>
-                            <p className={`font-semibold mb-1 ${darkMode ? 'text-amber-400' : 'text-amber-700'}`}>National Exam Tip</p>
-                            <p className={darkMode ? 'text-gray-400' : 'text-gray-600'}>{outcome.examTips?.join(', ')}</p>
-                          </div>
-                          <div className={`p-3.5 border rounded-xl ${
-                            darkMode ? 'bg-red-500/5 border-red-500/15' : 'bg-red-50 border-red-200/80'
-                          }`}>
-                            <p className={`font-semibold mb-1 ${darkMode ? 'text-red-400' : 'text-red-700'}`}>Common Pitfall Faults</p>
-                            <p className={darkMode ? 'text-gray-400' : 'text-gray-600'}>{outcome.commonMistakes?.join(', ')}</p>
-                          </div>
-                        </div>
-
-                        {/* National Exam Questions */}
-                        {outcome.nationalExamQuestions && outcome.nationalExamQuestions.length > 0 && (
-                          <div className={`p-3.5 border rounded-xl ${
-                            darkMode ? 'bg-indigo-500/5 border-indigo-500/15' : 'bg-indigo-50 border-indigo-200/80'
-                          }`}>
-                            <p className={`font-semibold mb-1.5 ${darkMode ? 'text-indigo-400' : 'text-indigo-700'}`}>Past National Exam Sample</p>
-                            {outcome.nationalExamQuestions.map((q, i) => (
-                              <div key={i} className="space-y-1">
-                                <p className={darkMode ? 'text-gray-200' : 'text-gray-800'}><strong>Q:</strong> {q.question}</p>
-                                <p className={darkMode ? 'text-emerald-400' : 'text-emerald-700 font-semibold'}><strong>A:</strong> {q.answer}</p>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-
-                        {/* Revision Notes Summary */}
-                        <div className={`p-3.5 border rounded-xl ${
-                          darkMode ? 'bg-teal-500/5 border-teal-500/15' : 'bg-teal-50 border-teal-200/80'
-                        }`}>
-                          <p className={`font-semibold mb-1 ${darkMode ? 'text-teal-400' : 'text-teal-700'}`}>Quick Revision Notes</p>
-                          <p className={`italic leading-relaxed ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>{outcome.shortRevisionSummary}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="py-12 text-center space-y-4">
-                    <AlertCircle className="w-8 h-8 text-amber-500 mx-auto animate-bounce" />
-                    <p className="text-xs text-gray-400 font-semibold">No syllabus summary is currently available for this module.</p>
-                    <button
-                      onClick={() => handleTriggerSummary(viewingDoc.id)}
-                      className="px-4 py-2 rounded-xl text-xs font-bold bg-brand-primary text-white hover:bg-brand-primary-hover transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-md"
-                    >
-                      <Sparkles className="w-3.5 h-3.5" /> Generate AI Summary
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Quick action buttons linked to other panels & simulators */}
-            <div className="pt-4 border-t border-gray-200/10 dark:border-gray-800/40 flex flex-wrap gap-3">
-              {(viewingDoc.category.toLowerCase().includes('linux') || viewingDoc.name.toLowerCase().includes('linux')) && (
-                <button
-                  onClick={() => setActiveTabType('linux_sim')}
-                  className="px-4 py-2.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5 cursor-pointer shadow-sm"
-                >
-                  <Terminal className="w-3.5 h-3.5" /> Launch Linux OS Simulator
-                </button>
-              )}
-
-              {(viewingDoc.category.toLowerCase().includes('programming') || 
-                viewingDoc.category.toLowerCase().includes('machine learning') || 
-                viewingDoc.category.toLowerCase().includes('artificial intelligence') || 
-                viewingDoc.name.toLowerCase().includes('python') || 
-                viewingDoc.name.toLowerCase().includes('learning')) && (
-                <button
-                  onClick={() => setActiveTabType('python_sim')}
-                  className="px-4 py-2.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5 cursor-pointer shadow-sm"
-                >
-                  <Code2 className="w-3.5 h-3.5" /> Launch Python & ML Runner
-                </button>
-              )}
-
-              <button
-                onClick={() => onNavigateToSection('ai_chat', undefined, viewingDoc.id)}
-                className="px-4 py-2.5 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-brand-primary text-white flex items-center gap-1.5 cursor-pointer"
-              >
-                <MessageSquare className="w-3.5 h-3.5" /> Ask AI Companion about this chapter
-              </button>
-              <button
-                onClick={() => onNavigateToSection('teacher', undefined, viewingDoc.id)}
-                className="px-4 py-2.5 rounded-xl text-xs font-semibold bg-purple-600 hover:bg-purple-500 text-white flex items-center gap-1.5 cursor-pointer"
-              >
-                <Sparkles className="w-3.5 h-3.5" /> Open Step-by-Step AI Teacher
-              </button>
-              <button
-                onClick={() => onNavigateToSection('flashcards', undefined, viewingDoc.id)}
-                className="px-4 py-2.5 rounded-xl text-xs font-semibold bg-teal-600 hover:bg-teal-500 text-white flex items-center gap-1.5 cursor-pointer"
-              >
-                <Layers className="w-3.5 h-3.5" /> Practice Flashcards
-              </button>
-              <button
-                onClick={() => onNavigateToSection('exams', viewingDoc.category as any, viewingDoc.id)}
-                className="px-4 py-2.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5 cursor-pointer shadow-sm"
-              >
-                <HelpCircle className="w-3.5 h-3.5" /> Take Exam / Practice Assessment
-              </button>
-            </div>
-          </div>
-        )}
-
-      {/* LOWER PAGINATION BUTTONS FOR CONVENIENT STUDYFLOW */}
-          <div className={`p-4 rounded-2xl border flex items-center justify-between ${
-            darkMode ? 'bg-elegant-card border-white/5' : 'bg-white border-gray-100'
-          } shadow-sm`}>
-            <button
-              onClick={handlePrev}
-              disabled={!prevDoc}
-              className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center gap-1 ${
-                !prevDoc 
-                  ? 'opacity-30 cursor-not-allowed text-gray-500 bg-gray-500/10' 
-                  : darkMode 
-                    ? 'bg-slate-900 border border-slate-800 hover:border-white/20 text-gray-200' 
-                    : 'bg-gray-100 border border-gray-200 hover:bg-gray-200 text-gray-800'
-              }`}
-            >
-              &larr; Previous Chapter
-            </button>
-            <button
-              onClick={handleNext}
-              disabled={!nextDoc}
-              className={`px-5 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center gap-1 text-slate-100 ${
-                !nextDoc 
-                  ? 'opacity-30 cursor-not-allowed bg-brand-primary/30 text-emerald-950/40' 
-                  : 'bg-brand-primary hover:bg-brand-primary-hover'
-              }`}
-            >
-              Next Chapter &rarr;
-            </button>
-          </div>
-        </div>
-
-        {/* SIBLING MODULES IN COURSE (Horizontal bar if multiple notes exist) */}
-        {siblingDocs.length > 1 && (
-          <div className={`p-4 rounded-2xl border ${
-            darkMode ? 'bg-elegant-card border-white/5' : 'bg-white border-gray-150'
-          } shadow-sm space-y-2`}>
-            <span className="text-[10px] font-mono font-bold text-[#04aa6d] uppercase tracking-widest">
-              More {viewingDoc.category} Notes ({siblingDocs.length})
-            </span>
-            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
-              {siblingDocs.map(doc => {
-                const isActive = doc.id === viewingDoc.id;
-                return (
-                  <button
-                    key={doc.id}
-                    onClick={() => {
-                      setViewingDoc(doc);
-                      if (doc.summary) setActiveSummary(doc.summary);
-                      else setActiveSummary(null);
-                      window.scrollTo({ top: 0, behavior: 'smooth' });
-                    }}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
-                      isActive
-                        ? (darkMode ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-emerald-50 text-emerald-700 border border-emerald-200')
-                        : (darkMode ? 'hover:bg-white/5 text-gray-400 hover:text-white border border-white/5' : 'hover:bg-gray-100 text-gray-600 border border-gray-200')
-                    }`}
-                  >
-                    <span>{doc.name}</span>
-                    {isActive && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          <W3SchoolsNoteViewer
+            document={viewingDoc}
+            darkMode={darkMode}
+            onNavigateHome={() => {
+              onNavigateToSection('documents', undefined, undefined);
+              setViewingDoc(null);
+              setActiveSummary(null);
+            }}
+            onPrevDoc={prevDoc ? handlePrev : undefined}
+            onNextDoc={nextDoc ? handleNext : undefined}
+            hasPrevDoc={Boolean(prevDoc)}
+            hasNextDoc={Boolean(nextDoc)}
+            onDeleteDoc={isAdmin ? () => setDocToDelete(viewingDoc) : undefined}
+            onEditDoc={isAdmin ? handleStartEdit : undefined}
+            userRole={isAdmin ? 'admin' : userRole}
+            onLaunchLinuxSimulator={() => {
+              onNavigateToSection('linux', viewingDoc.id, viewingDoc.category);
+            }}
+            onLaunchPythonSimulator={() => {
+              onNavigateToSection('python', viewingDoc.id, viewingDoc.category);
+            }}
+          />
         )}
 
         {renderDeleteModal()}
@@ -2144,7 +1325,17 @@ export default function DocumentViewer({
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-fade-in text-left">
+    <div className="space-y-6 animate-fade-in text-left">
+      <div className="pb-2 border-b border-gray-200 dark:border-white/10">
+        <h1 className={`font-display text-2xl sm:text-3xl font-black tracking-tight ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+          {selectedCategory && selectedCategory !== 'All' ? `${selectedCategory} Study Manuals & Notes` : 'Technical Curriculum & Notes Library'}
+        </h1>
+        <p className="text-xs text-gray-500 dark:text-gray-400 font-medium mt-1">
+          Explore structured lessons, chapter notes, code snippets, and interactive sandboxes across 19 technical domains
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
       {/* LEFT & CENTER PANEL: Document List */}
       <div className="lg:col-span-2 space-y-6">
         {/* Main File List Explorer */}
@@ -2202,6 +1393,24 @@ export default function DocumentViewer({
             </div>
           </div>
 
+          {documentsError && documents.length === 0 && (
+            <div className="p-4 rounded-2xl border border-red-500/30 bg-red-500/10 text-red-500 flex items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span className="font-semibold">{documentsError}</span>
+              </div>
+              {onRetryLoad && (
+                <button
+                  onClick={onRetryLoad}
+                  className="px-3 py-1.5 rounded-lg bg-red-500 text-white font-bold hover:bg-red-600 transition-all cursor-pointer flex items-center gap-1"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  Retry
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Grid of existing Documents */}
           {filteredDocuments.length > 0 ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -2247,8 +1456,8 @@ export default function DocumentViewer({
                     <div className="mt-5 pt-3 border-t border-gray-200/10 dark:border-gray-800/40 flex items-center justify-between text-xs">
                       <span className="text-[10px] text-gray-500 uppercase font-bold font-mono">{doc.type} module</span>
                       <button
-                        onClick={() => { setViewingDoc(doc); setActiveSummary(null); }}
-                        className="text-xs font-bold text-indigo-400 hover:text-indigo-300 flex items-center gap-1"
+                        onClick={() => openDocument(doc)}
+                        className="text-xs font-bold text-indigo-400 hover:text-indigo-300 flex items-center gap-1 cursor-pointer"
                         id={`btn-read-online-${doc.id}`}
                       >
                         Read & Study <ArrowRight className="w-3.5 h-3.5" />
@@ -2526,5 +1735,6 @@ export default function DocumentViewer({
       {renderDeleteModal()}
       {renderResetModal()}
     </div>
+  </div>
   );
 }

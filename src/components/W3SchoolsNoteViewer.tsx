@@ -5,7 +5,7 @@ import {
   ChevronLeft, ChevronDown, ChevronUp, RefreshCw, Sparkles, CheckCheck, Bookmark, 
   ArrowRight, ArrowLeft, Layers, Sliders, Sun, Moon, Maximize2, Minimize2, 
   FileText, Split, Share2, Award, CornerDownLeft, RotateCcw, X, CheckCircle2, Hash,
-  Image as ImageIcon, ZoomIn, ZoomOut, RotateCw, ExternalLink, Camera, Edit
+  Image as ImageIcon, ZoomIn, ZoomOut, RotateCw, ExternalLink, Camera, Edit, Trash2
 } from 'lucide-react';
 import { Document, CategoryName } from '../types.js';
 
@@ -1622,6 +1622,19 @@ export default function W3SchoolsNoteViewer({
             >
               <Edit className="w-3.5 h-3.5" />
               <span className="hidden md:inline">Edit</span>
+            </button>
+          )}
+
+          {/* Delete Note Button (if admin / callback provided) */}
+          {onDeleteDoc && (
+            <button
+              onClick={onDeleteDoc}
+              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-red-500/10 text-red-500 dark:text-red-400 border border-red-500/30 hover:bg-red-500 hover:text-white transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
+              title="Delete this note (Admin)"
+              id="btn-w3-delete-note"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Delete</span>
             </button>
           )}
           {/* Font Size A- / A / A+ */}

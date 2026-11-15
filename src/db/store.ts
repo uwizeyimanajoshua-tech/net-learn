@@ -1,9 +1,12 @@
 import fs from 'fs';
 import path from 'path';
+import dotenv from 'dotenv';
+dotenv.config();
+
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore, Firestore, doc, setDoc, updateDoc, deleteDoc, collection, getDocs, writeBatch } from 'firebase/firestore';
-import type { User, Document, ChatSession, Quiz, Flashcard, StudentProgress } from '../types.ts';
-import { CATEGORIES } from '../types.ts';
+import { initializeFirestore, getFirestore, Firestore, doc, setDoc, updateDoc, deleteDoc, collection, getDocs, writeBatch } from 'firebase/firestore';
+import type { User, Document, ChatSession, Quiz, Flashcard, StudentProgress } from '../types.js';
+import { CATEGORIES } from '../types.js';
 
 // Read Firebase applet configuration
 const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
@@ -23,7 +26,13 @@ let firestoreEnabled = false;
 try {
   if (firebaseConfig && firebaseConfig.projectId && firebaseConfig.apiKey) {
     const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-    dbFirestore = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+    try {
+      dbFirestore = initializeFirestore(app, {
+        experimentalAutoDetectLongPolling: true,
+      }, firebaseConfig.firestoreDatabaseId);
+    } catch {
+      dbFirestore = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+    }
     firestoreEnabled = true;
     console.log('[Firestore] Initialized successfully with database:', firebaseConfig.firestoreDatabaseId);
   } else {
@@ -33,13 +42,57 @@ try {
   console.warn('Firebase initialization skipped or failed. Using local storage.', error);
 }
 
-async function runFirestore<T>(op: () => Promise<T>): Promise<T | null> {
+async function runFirestore<T>(op: () => Promise<T>, timeoutMs = 12000): Promise<T | null> {
   if (!firestoreEnabled || !dbFirestore) return null;
   try {
-    return await op();
+    const opPromise = op();
+    const timeoutPromise = new Promise<null>((_, reject) => setTimeout(() => reject(new Error('Firestore timeout')), timeoutMs));
+    return await Promise.race([opPromise, timeoutPromise]);
   } catch (err: any) {
     const msg = err?.message || '';
     console.warn('Firestore operation notice:', msg);
+    return null;
+  }
+}
+
+// Deep object cleaner to prevent Firebase "Unsupported field value: undefined" errors
+function sanitizeForFirestore(obj: any): any {
+  if (obj === null || obj === undefined) return null;
+  if (typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) {
+    return obj.map(item => sanitizeForFirestore(item));
+  }
+  const result: Record<string, any> = {};
+  for (const [key, val] of Object.entries(obj)) {
+    if (val !== undefined) {
+      result[key] = sanitizeForFirestore(val);
+    }
+  }
+  return result;
+}
+
+import { neon } from '@neondatabase/serverless';
+
+// Initialize Neon Postgres client
+const databaseUrl = process.env.DATABASE_URL || process.env.DATABASE_URL_UNPOOLED;
+export let sqlClient: ReturnType<typeof neon> | null = null;
+if (databaseUrl) {
+  try {
+    sqlClient = neon(databaseUrl);
+    console.log('[Neon Postgres] Client initialized with DATABASE_URL');
+  } catch (err) {
+    console.warn('[Neon Postgres] Client initialization skipped:', err);
+  }
+}
+
+export async function runNeon<T>(op: (sql: ReturnType<typeof neon>) => Promise<T>): Promise<T | null> {
+  if (!sqlClient) return null;
+  try {
+    const opPromise = op(sqlClient);
+    const timeoutPromise = new Promise<null>((_, reject) => setTimeout(() => reject(new Error('Neon timeout')), 3000));
+    return await Promise.race([opPromise, timeoutPromise]);
+  } catch (err: any) {
+    console.warn('[Neon Postgres] Query notice:', err?.message || err);
     return null;
   }
 }
@@ -220,9 +273,9 @@ const DEFAULT_DB: DatabaseSchema = {
 // Helper to safely write and read store
 function loadDB(): DatabaseSchema {
   try {
-    if (process.env.VERCEL && !fs.existsSync(STORE_PATH)) {
-      const rootStore = path.join(process.cwd(), 'db_store.json');
-      if (fs.existsSync(rootStore)) {
+    const rootStore = path.join(process.cwd(), 'db_store.json');
+    if (STORE_PATH !== rootStore && fs.existsSync(rootStore)) {
+      if (!fs.existsSync(STORE_PATH) || fs.statSync(rootStore).mtimeMs > fs.statSync(STORE_PATH).mtimeMs) {
         try {
           fs.copyFileSync(rootStore, STORE_PATH);
         } catch (e) {
@@ -284,8 +337,18 @@ function saveDB(data: DatabaseSchema) {
       const fallbackPath = path.join('/tmp', 'db_store.json');
       fs.writeFileSync(fallbackPath, JSON.stringify(data, null, 2), 'utf-8');
     } catch (e) {
-      console.error('Error saving DB:', error, e);
+      console.error('Error saving DB to fallback:', error, e);
     }
+  }
+
+  // Also keep workspace root db_store.json in sync if different from STORE_PATH
+  try {
+    const rootStore = path.join(process.cwd(), 'db_store.json');
+    if (STORE_PATH !== rootStore) {
+      fs.writeFileSync(rootStore, JSON.stringify(data, null, 2), 'utf-8');
+    }
+  } catch (syncRootErr) {
+    // Non-critical if running in read-only environment
   }
 }
 
@@ -315,6 +378,14 @@ export const db = {
       console.log(`Saved user ${user.id} to Firestore.`);
     });
 
+    runNeon(async (sql) => {
+      await sql`
+        INSERT INTO users (id, email, username, password, role, is_verified, created_at, avatar)
+        VALUES (${user.id}, ${user.email}, ${user.username}, ${user.password || '123'}, ${user.role || 'student'}, ${user.isVerified ?? true}, ${user.createdAt || new Date().toISOString()}, ${user.avatar || null})
+        ON CONFLICT (email) DO UPDATE SET username = EXCLUDED.username, role = EXCLUDED.role, password = EXCLUDED.password;
+      `;
+    });
+
     return user;
   },
   updateUser: (id: string, updates: Partial<User>) => {
@@ -329,6 +400,15 @@ export const db = {
         delete fullUser.password;
         await setDoc(doc(dbFirestore!, 'users', id), fullUser, { merge: true });
         console.log(`Updated user ${id} in Firestore.`);
+      });
+
+      runNeon(async (sql) => {
+        const u = data.users[idx];
+        await sql`
+          UPDATE users 
+          SET username = ${u.username}, role = ${u.role}, is_verified = ${u.isVerified ?? true}, avatar = ${u.avatar || null}, reset_token = ${u.resetToken || null}, reset_expires = ${u.resetExpires || null}
+          WHERE id = ${id};
+        `;
       });
 
       return data.users[idx];
@@ -346,41 +426,100 @@ export const db = {
     runFirestore(async () => {
       await deleteDoc(doc(dbFirestore!, 'users', id));
     });
+
+    runNeon(async (sql) => {
+      await sql`DELETE FROM users WHERE id = ${id};`;
+    });
   },
 
   // Documents
   getDocuments: () => loadDB().documents,
   getDocumentById: (id: string) => loadDB().documents.find(d => d.id === id),
   createDocument: async (newDoc: Document) => {
+    // Sanitize document for local JSON store so fileData does not exceed 200KB
+    const localDoc: Document = { ...newDoc };
+    if (localDoc.fileData && localDoc.fileData.length > 200000) {
+      delete localDoc.fileData;
+    }
+
     const data = loadDB();
-    data.documents.push(newDoc);
+    data.documents.push(localDoc);
     saveDB(data);
 
-    await runFirestore(async () => {
-      const firestoreDoc: any = { ...newDoc };
-      if (firestoreDoc.fileData && firestoreDoc.fileData.length > 200000) {
-        delete firestoreDoc.fileData;
+    try {
+      await runFirestore(async () => {
+        const firestoreDoc: any = sanitizeForFirestore(localDoc);
+        delete firestoreDoc.fileData; // Never write base64 fileData to Firestore to avoid 1MB limit
+        if (firestoreDoc.textContent && firestoreDoc.textContent.length > 200000) {
+          firestoreDoc.textContent = firestoreDoc.textContent.slice(0, 200000);
+        }
+        if (Array.isArray(firestoreDoc.splitContent) && firestoreDoc.splitContent.length > 30) {
+          firestoreDoc.splitContent = firestoreDoc.splitContent.slice(0, 30);
+        }
+        await setDoc(doc(dbFirestore!, 'documents', newDoc.id), firestoreDoc);
+        console.log(`Uploaded document ${newDoc.id} to Firestore.`);
+      });
+    } catch (fsErr) {
+      console.warn('Firestore write warning in createDocument:', fsErr);
+    }
+
+    runNeon(async (sql) => {
+      try {
+        const safeText = (newDoc.textContent || '').replace(/\0/g, '').replace(/\\u0000/g, '').slice(0, 400000);
+        const safeFileData = (newDoc.fileData || '').replace(/\0/g, '').replace(/\\u0000/g, '');
+        const safeSplitJson = JSON.stringify(newDoc.splitContent || []).replace(/\0/g, '').replace(/\\u0000/g, '');
+        const safeDiagramsJson = JSON.stringify((newDoc as any).diagrams || []).replace(/\0/g, '').replace(/\\u0000/g, '');
+        const safeName = (newDoc.name || '').replace(/\0/g, '').replace(/\\u0000/g, '');
+        const safeCategory = (newDoc.category || '').replace(/\0/g, '').replace(/\\u0000/g, '');
+        const summaryStr = typeof newDoc.summary === 'string' ? newDoc.summary : (newDoc.summary ? JSON.stringify(newDoc.summary) : '');
+        const safeSummary = summaryStr.replace(/\0/g, '').replace(/\\u0000/g, '');
+        await sql`
+          INSERT INTO documents (id, name, category, size, page_count, summary, split_content, diagrams, download_url, file_key, created_at, bookmarked, text_content, file_data)
+          VALUES (${newDoc.id}, ${safeName}, ${safeCategory}, ${newDoc.size || 0}, ${(newDoc as any).pageCount || 1}, ${safeSummary}, ${safeSplitJson}::jsonb, ${safeDiagramsJson}::jsonb, ${(newDoc as any).downloadUrl || null}, ${(newDoc as any).fileKey || null}, ${(newDoc as any).createdAt || new Date().toISOString()}, ${(newDoc as any).bookmarked ?? false}, ${safeText}, ${safeFileData || null})
+          ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, summary = EXCLUDED.summary, split_content = EXCLUDED.split_content, diagrams = EXCLUDED.diagrams, file_key = EXCLUDED.file_key, download_url = EXCLUDED.download_url, text_content = EXCLUDED.text_content, file_data = EXCLUDED.file_data;
+        `;
+      } catch (sqlErr: any) {
+        console.warn('Postgres document insertion notice:', sqlErr?.message || sqlErr);
       }
-      await setDoc(doc(dbFirestore!, 'documents', newDoc.id), firestoreDoc);
-      console.log(`Uploaded document ${newDoc.id} to Firestore.`);
     });
 
-    return newDoc;
+    return localDoc;
   },
   updateDocument: async (id: string, updates: Partial<Document>) => {
     const data = loadDB();
     const idx = data.documents.findIndex(d => d.id === id);
     if (idx !== -1) {
-      data.documents[idx] = { ...data.documents[idx], ...updates };
+      const sanitizedUpdates = { ...updates };
+      if (sanitizedUpdates.fileData && sanitizedUpdates.fileData.length > 200000) {
+        delete sanitizedUpdates.fileData;
+      }
+      data.documents[idx] = { ...data.documents[idx], ...sanitizedUpdates };
       saveDB(data);
 
-      await runFirestore(async () => {
-        const firestoreUpdates: any = { ...updates };
-        if (firestoreUpdates.fileData && firestoreUpdates.fileData.length > 200000) {
+      try {
+        await runFirestore(async () => {
+          const firestoreUpdates: any = sanitizeForFirestore(sanitizedUpdates);
           delete firestoreUpdates.fileData;
-        }
-        await setDoc(doc(dbFirestore!, 'documents', id), firestoreUpdates, { merge: true });
-        console.log(`Updated document ${id} in Firestore.`);
+          if (firestoreUpdates.textContent && firestoreUpdates.textContent.length > 200000) {
+            firestoreUpdates.textContent = firestoreUpdates.textContent.slice(0, 200000);
+          }
+          if (Array.isArray(firestoreUpdates.splitContent) && firestoreUpdates.splitContent.length > 30) {
+            firestoreUpdates.splitContent = firestoreUpdates.splitContent.slice(0, 30);
+          }
+          await setDoc(doc(dbFirestore!, 'documents', id), firestoreUpdates, { merge: true });
+          console.log(`Updated document ${id} in Firestore.`);
+        });
+      } catch (fsErr) {
+        console.warn('Firestore update warning in updateDocument:', fsErr);
+      }
+
+      runNeon(async (sql) => {
+        const d = data.documents[idx];
+        await sql`
+          UPDATE documents 
+          SET name = ${d.name}, summary = ${d.summary || ''}, bookmarked = ${d.bookmarked ?? false}, split_content = ${JSON.stringify(d.splitContent || [])}::jsonb, diagrams = ${JSON.stringify(d.diagrams || [])}::jsonb
+          WHERE id = ${id};
+        `;
       });
 
       return data.documents[idx];
@@ -397,6 +536,10 @@ export const db = {
     await runFirestore(async () => {
       await deleteDoc(doc(dbFirestore!, 'documents', id));
       console.log(`Deleted document ${id} from Firestore.`);
+    });
+
+    runNeon(async (sql) => {
+      await sql`DELETE FROM documents WHERE id = ${id};`;
     });
   },
 
@@ -458,13 +601,24 @@ export const db = {
 
   // Chats
   getChatsByUser: (userId: string) => loadDB().chats.filter(c => c.userId === userId).sort((a,b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
-  getChatById: (id: string) => loadDB().chats.find(c => c.id === id),
+  getChatById: (id: string) => {
+    const local = loadDB().chats.find(c => c.id === id);
+    if (local) return local;
+    return null;
+  },
   createChat: (chat: ChatSession) => {
     const data = loadDB();
     data.chats.push(chat);
     saveDB(data);
     runFirestore(async () => {
       await setDoc(doc(dbFirestore!, 'chats', chat.id), chat);
+    });
+    runNeon(async (sql) => {
+      await sql`
+        INSERT INTO chats (id, user_id, title, doc_id, category, messages, created_at, updated_at)
+        VALUES (${chat.id}, ${chat.userId}, ${chat.title}, ${chat.docId || null}, ${chat.category || null}, ${JSON.stringify(chat.messages || [])}::jsonb, ${chat.createdAt}, ${chat.updatedAt})
+        ON CONFLICT (id) DO UPDATE SET messages = EXCLUDED.messages, updated_at = EXCLUDED.updated_at, title = EXCLUDED.title;
+      `;
     });
     return chat;
   },
@@ -477,6 +631,15 @@ export const db = {
       runFirestore(async () => {
         await setDoc(doc(dbFirestore!, 'chats', id), { ...updates, updatedAt: new Date().toISOString() }, { merge: true });
       });
+      runNeon(async (sql) => {
+        await sql`
+          UPDATE chats 
+          SET messages = ${JSON.stringify(data.chats[idx].messages || [])}::jsonb, 
+              title = ${data.chats[idx].title},
+              updated_at = ${data.chats[idx].updatedAt}
+          WHERE id = ${id};
+        `;
+      });
       return data.chats[idx];
     }
     return null;
@@ -487,6 +650,9 @@ export const db = {
     saveDB(data);
     runFirestore(async () => {
       await deleteDoc(doc(dbFirestore!, 'chats', id));
+    });
+    runNeon(async (sql) => {
+      await sql`DELETE FROM chats WHERE id = ${id};`;
     });
   },
 
@@ -500,6 +666,13 @@ export const db = {
     runFirestore(async () => {
       await setDoc(doc(dbFirestore!, 'quizzes', quiz.id), quiz);
     });
+    runNeon(async (sql) => {
+      await sql`
+        INSERT INTO quizzes (id, title, category, doc_id, questions, created_at)
+        VALUES (${quiz.id}, ${quiz.title}, ${quiz.category}, ${quiz.docId || null}, ${JSON.stringify(quiz.questions || [])}::jsonb, ${quiz.createdAt})
+        ON CONFLICT (id) DO UPDATE SET questions = EXCLUDED.questions, title = EXCLUDED.title;
+      `;
+    });
     return quiz;
   },
 
@@ -512,6 +685,13 @@ export const db = {
     runFirestore(async () => {
       await setDoc(doc(dbFirestore!, 'flashcards', fc.id), fc);
     });
+    runNeon(async (sql) => {
+      await sql`
+        INSERT INTO flashcards (id, user_id, doc_id, category, question, answer, mastered, created_at)
+        VALUES (${fc.id}, ${fc.userId || null}, ${fc.docId || null}, ${fc.category}, ${fc.front || ''}, ${fc.back || ''}, ${fc.isMastered ?? false}, ${fc.createdAt})
+        ON CONFLICT (id) DO UPDATE SET question = EXCLUDED.question, answer = EXCLUDED.answer, mastered = EXCLUDED.mastered;
+      `;
+    });
     return fc;
   },
   updateFlashcard: (id: string, updates: Partial<Flashcard>) => {
@@ -523,6 +703,14 @@ export const db = {
       runFirestore(async () => {
         await setDoc(doc(dbFirestore!, 'flashcards', id), updates, { merge: true });
       });
+      runNeon(async (sql) => {
+        const f = data.flashcards[idx];
+        await sql`
+          UPDATE flashcards 
+          SET question = ${f.front || ''}, answer = ${f.back || ''}, mastered = ${f.isMastered ?? false}
+          WHERE id = ${id};
+        `;
+      });
       return data.flashcards[idx];
     }
     return null;
@@ -533,6 +721,9 @@ export const db = {
     saveDB(data);
     runFirestore(async () => {
       await deleteDoc(doc(dbFirestore!, 'flashcards', id));
+    });
+    runNeon(async (sql) => {
+      await sql`DELETE FROM flashcards WHERE id = ${id};`;
     });
   },
 
@@ -593,46 +784,224 @@ export const db = {
   }
 };
 
-export async function syncFromFirestore() {
-  await runFirestore(async () => {
-    console.log('[Firestore] Syncing documents from Firestore...');
-    const snapshot = await getDocs(collection(dbFirestore!, 'documents'));
-    if (!snapshot.empty) {
-      const docs: Document[] = [];
-      snapshot.forEach(docSnap => {
-        docs.push(docSnap.data() as Document);
-      });
-      const localDB = loadDB();
-      localDB.documents = docs;
-      saveDB(localDB);
-      console.log(`[Firestore] Successfully synced ${docs.length} documents from Firestore.`);
-    } else {
-      console.log('[Firestore] Firestore documents collection is empty. Seeding local database documents to Firestore...');
-      const localDB = loadDB();
-      if (!localDB.documents || localDB.documents.length === 0) {
-        localDB.documents = JSON.parse(JSON.stringify(DEFAULT_DB.documents));
-        saveDB(localDB);
-      }
-    }
-
-    // Seed and sync user profiles to Firestore so all users exist in Firestore
+export async function syncFromNeon() {
+  await runNeon(async (sql) => {
     try {
+      const users = (await sql`SELECT * FROM users;`) as any[];
+      const documents = (await sql`SELECT * FROM documents;`) as any[];
+      const chats = (await sql`SELECT * FROM chats;`) as any[];
+      const quizzes = (await sql`SELECT * FROM quizzes;`) as any[];
+      const flashcards = (await sql`SELECT * FROM flashcards;`) as any[];
+
       const localDB = loadDB();
-      if (localDB.users && Array.isArray(localDB.users)) {
-        for (const u of localDB.users) {
-          const cleanUser = { ...u };
-          delete cleanUser.password;
-          await setDoc(doc(dbFirestore!, 'users', u.id), cleanUser, { merge: true });
-        }
-        console.log(`[Firestore] Synced ${localDB.users.length} users to Firestore.`);
+      if (users && users.length > 0) {
+        localDB.users = users.map((u: any) => ({
+          id: u.id,
+          email: u.email,
+          username: u.username,
+          password: u.password,
+          role: u.role,
+          isVerified: u.is_verified,
+          createdAt: u.created_at,
+          avatar: u.avatar,
+          resetToken: u.reset_token,
+          resetExpires: u.reset_expires ? Number(u.reset_expires) : undefined
+        }));
       }
-    } catch (userSyncErr: any) {
-      console.warn('[Firestore] User sync notice:', userSyncErr?.message || userSyncErr);
+      if (documents && documents.length > 0) {
+        localDB.documents = documents.map((d: any) => ({
+          id: d.id,
+          name: d.name,
+          type: d.type || 'pdf',
+          size: Number(d.size),
+          category: d.category,
+          textContent: d.text_content || d.summary || '',
+          uploadedAt: d.created_at || new Date().toISOString(),
+          userId: d.user_id || 'usr_admin',
+          bookmarks: [],
+          pageCount: d.page_count,
+          summary: d.summary,
+          splitContent: typeof d.split_content === 'string' ? JSON.parse(d.split_content) : (d.split_content || []),
+          diagrams: typeof d.diagrams === 'string' ? JSON.parse(d.diagrams) : (d.diagrams || []),
+          downloadUrl: d.download_url,
+          fileKey: d.file_key,
+          fileData: d.file_data || undefined,
+          createdAt: d.created_at,
+          bookmarked: d.bookmarked
+        }));
+      }
+      if (chats && chats.length > 0) {
+        localDB.chats = chats.map((c: any) => ({
+          id: c.id,
+          userId: c.user_id,
+          title: c.title,
+          docId: c.doc_id,
+          category: c.category,
+          messages: typeof c.messages === 'string' ? JSON.parse(c.messages) : (c.messages || []),
+          createdAt: c.created_at,
+          updatedAt: c.updated_at
+        }));
+      }
+      if (quizzes && quizzes.length > 0) {
+        localDB.quizzes = quizzes.map((q: any) => ({
+          id: q.id,
+          title: q.title,
+          category: q.category,
+          docId: q.doc_id,
+          questions: typeof q.questions === 'string' ? JSON.parse(q.questions) : (q.questions || []),
+          createdAt: q.created_at
+        }));
+      }
+      if (flashcards && flashcards.length > 0) {
+        localDB.flashcards = flashcards.map((f: any) => ({
+          id: f.id,
+          userId: f.user_id,
+          docId: f.doc_id,
+          category: f.category,
+          front: f.question,
+          back: f.answer,
+          isMastered: f.mastered,
+          createdAt: f.created_at
+        }));
+      }
+      saveDB(localDB);
+      console.log(`[Neon Postgres] Synced ${localDB.users.length} users, ${localDB.documents.length} docs, ${localDB.chats.length} chats.`);
+    } catch (neonSyncErr: any) {
+      console.warn('[Neon Postgres] syncFromNeon notice:', neonSyncErr?.message || neonSyncErr);
     }
   });
 }
 
-// Trigger async sync on startup
-syncFromFirestore().catch(err => {
-  console.error('Startup Firestore sync notice:', err);
-});
+let lastFirestoreSyncAt = 0;
+let activeFirestoreSync: Promise<void> | null = null;
+
+function isJunkTestDocument(d: Partial<Document>): boolean {
+  if (!d || !d.name) return true;
+  const badNames = new Set([
+    'package.json',
+    'test_binary.pdf',
+    'test_syllabus.pdf',
+    'test_network_note.txt',
+    'Firewall_Packet_Filtering_Guide.txt'
+  ]);
+  if (badNames.has(d.name)) return true;
+  if (d.category === 'C Programming' && d.name.includes('Window Server')) return true;
+  return false;
+}
+
+export async function syncDocumentsIfStale(maxAgeMs = 15000): Promise<void> {
+  if (!firestoreEnabled || !dbFirestore) return;
+  if (Date.now() - lastFirestoreSyncAt < maxAgeMs) return;
+  if (activeFirestoreSync) {
+    await activeFirestoreSync;
+    return;
+  }
+  await syncFromFirestore();
+}
+
+export async function syncFromFirestore() {
+  if (activeFirestoreSync) {
+    await activeFirestoreSync;
+    return;
+  }
+  activeFirestoreSync = (async () => {
+    await runFirestore(async () => {
+      console.log('[Firestore] Syncing documents with Firestore...');
+      const snapshot = await getDocs(collection(dbFirestore!, 'documents'));
+      const firestoreDocs: Document[] = [];
+      if (!snapshot.empty) {
+        snapshot.forEach(docSnap => {
+          firestoreDocs.push(docSnap.data() as Document);
+        });
+      }
+
+      const localDB = loadDB();
+      const docMap = new Map<string, Document>();
+
+      // 1. Load local documents first (skipping junk test docs)
+      for (const d of localDB.documents || []) {
+        if (d && d.id && !isJunkTestDocument(d)) {
+          docMap.set(d.id, d);
+        }
+      }
+
+      // 2. Merge Firestore documents (keep richer splitContent/textContent if present locally)
+      for (const fd of firestoreDocs) {
+        if (fd && fd.id) {
+          if (isJunkTestDocument(fd)) {
+            // Remove junk test docs from Firestore asynchronously
+            deleteDoc(doc(dbFirestore!, 'documents', fd.id)).catch(() => {});
+            continue;
+          }
+          const existing = docMap.get(fd.id);
+          if (existing) {
+            const merged: Document = { ...existing, ...fd };
+            if (existing.splitContent && existing.splitContent.length > (fd.splitContent?.length || 0)) {
+              merged.splitContent = existing.splitContent;
+            }
+            if (existing.textContent && existing.textContent.length > (fd.textContent?.length || 0)) {
+              merged.textContent = existing.textContent;
+            }
+            docMap.set(fd.id, merged);
+          } else {
+            docMap.set(fd.id, fd);
+          }
+        }
+      }
+
+      localDB.documents = Array.from(docMap.values());
+      saveDB(localDB);
+      lastFirestoreSyncAt = Date.now();
+      console.log(`[Firestore] Successfully merged ${localDB.documents.length} total documents (Firestore had ${firestoreDocs.length}).`);
+
+      // 3. Ensure any local documents not yet in Firestore or missing sections get uploaded to Firestore
+      for (const docItem of localDB.documents) {
+        const inFs = firestoreDocs.find(f => f.id === docItem.id);
+        if (!inFs || (docItem.splitContent && (!inFs.splitContent || inFs.splitContent.length === 0))) {
+          try {
+            const firestoreDoc: any = sanitizeForFirestore(docItem);
+            delete firestoreDoc.fileData;
+            if (firestoreDoc.textContent && firestoreDoc.textContent.length > 200000) {
+              firestoreDoc.textContent = firestoreDoc.textContent.slice(0, 200000);
+            }
+            if (Array.isArray(firestoreDoc.splitContent) && firestoreDoc.splitContent.length > 30) {
+              firestoreDoc.splitContent = firestoreDoc.splitContent.slice(0, 30);
+            }
+            await setDoc(doc(dbFirestore!, 'documents', docItem.id), firestoreDoc, { merge: true });
+            console.log(`[Firestore] Seeded doc to Firestore: ${docItem.id} (${docItem.name})`);
+          } catch (fsWriteErr: any) {
+            console.warn(`[Firestore] Document sync notice for ${docItem.id}:`, fsWriteErr?.message || fsWriteErr);
+          }
+        }
+      }
+
+      // Seed and sync user profiles to Firestore so all users exist in Firestore
+      try {
+        if (localDB.users && Array.isArray(localDB.users)) {
+          for (const u of localDB.users) {
+            const cleanUser = { ...u };
+            delete cleanUser.password;
+            await setDoc(doc(dbFirestore!, 'users', u.id), cleanUser, { merge: true });
+          }
+          console.log(`[Firestore] Synced ${localDB.users.length} users to Firestore.`);
+        }
+      } catch (userSyncErr: any) {
+        console.warn('[Firestore] User sync notice:', userSyncErr?.message || userSyncErr);
+      }
+    });
+  })();
+
+  try {
+    await activeFirestoreSync;
+  } finally {
+    activeFirestoreSync = null;
+  }
+}
+
+// Trigger startup sync (skip eagerly blocking cold starts in serverless; routes await syncDocumentsIfStale)
+if (!process.env.VERCEL) {
+  syncFromNeon().then(() => syncFromFirestore()).catch(err => {
+    console.error('Startup DB sync notice:', err);
+  });
+}
+

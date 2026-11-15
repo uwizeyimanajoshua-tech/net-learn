@@ -50,7 +50,7 @@ const INITIAL_PROCESSES: ProcessItem[] = [
   { pid: 2104, user: 'student', cpu: 0.8, mem: 1.2, vsz: 88200, rss: 24500, stat: 'S', time: '0:04', command: 'python3 /home/student/health_check.py --monitor' },
 ];
 
-const INITIAL_PACKAGES = ['coreutils', 'bash', 'grep', 'sed', 'systemd', 'nginx', 'python3', 'curl', 'openssh-server'];
+const INITIAL_PACKAGES = ['coreutils', 'bash', 'grep', 'sed', 'systemd', 'nginx', 'python3', 'gcc', 'make', 'build-essential', 'curl', 'openssh-server'];
 
 function createDefaultFilesystem(): FileNode {
   return {
@@ -313,8 +313,19 @@ Try running standard Linux commands:
   • free -m           - View RAM / memory usage
   • systemctl status nginx  - Check web server status
   • neofetch          - Display system hardware & OS stats
+  • gcc main.c -o main && ./main  - Compile and run C program
   • help              - View full command reference
 `
+              },
+              'main.c': {
+                name: 'main.c',
+                type: 'file',
+                permissions: '-rw-r--r--',
+                owner: 'student',
+                group: 'student',
+                size: 260,
+                mtime: 'Sep 29 07:20',
+                content: `#include <stdio.h>\n\nint main() {\n    printf("=========================================\\n");\n    printf("   Hello from C on Ubuntu Linux 24.04!   \\n");\n    printf("=========================================\\n");\n    printf("Compiled with GCC 12.3 (Native x86_64 Architecture)\\n");\n    return 0;\n}\n`
               },
               'backup.sh': {
                 name: 'backup.sh',
@@ -1225,6 +1236,61 @@ Processing triggers for man-db...`
         return { output: 'Terminal session cannot be terminated. Type clear to wipe logs.' };
       }
 
+      case 'gcc':
+      case 'cc': {
+        if (args.length === 0) {
+          return { output: 'gcc: fatal error: no input files\ncompilation terminated.', isError: true };
+        }
+        if (args.includes('--version') || args.includes('-v')) {
+          return {
+            output: 'gcc (Ubuntu 12.3.0-1ubuntu1~22.04.3) 12.3.0\nCopyright (C) 2022 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.'
+          };
+        }
+        let outputBin = 'a.out';
+        const oIndex = args.indexOf('-o');
+        if (oIndex !== -1 && args[oIndex + 1]) {
+          outputBin = args[oIndex + 1];
+        }
+
+        const sourceFile = args.find(a => a.endsWith('.c') || (!a.startsWith('-') && a !== outputBin));
+        if (!sourceFile) {
+          return { output: 'gcc: fatal error: no input C source file specified.', isError: true };
+        }
+        const fileNode = findNode(resolvePath(sourceFile));
+        if (!fileNode) {
+          return { output: `gcc: error: ${sourceFile}: No such file or directory\ngcc: fatal error: no input files\ncompilation terminated.`, isError: true };
+        }
+
+        const binNode: FileNode = {
+          name: outputBin,
+          type: 'file',
+          permissions: '-rwxr-xr-x',
+          owner: currentUser,
+          group: currentUser,
+          size: 16840,
+          mtime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          content: `[ELF 64-bit LSB executable, x86-64]\n` +
+            (fileNode.content?.includes('printf')
+              ? '=========================================\n   Hello from C on Ubuntu Linux 24.04!   \n=========================================\nCompiled with GCC 12.3 (Native x86_64 Architecture)'
+              : 'Program output: Execution finished with return code 0.')
+        };
+
+        const currDir = findNode(cwd);
+        if (currDir && currDir.children) {
+          currDir.children[outputBin] = binNode;
+        }
+
+        return {
+          output: `[GCC 12.3]: Successfully compiled '${sourceFile}' -> '${outputBin}' (ELF 64-bit executable). Run with ./${outputBin}`
+        };
+      }
+
+      case 'make': {
+        return {
+          output: 'make: Nothing to be done for \'all\'. Targets are up to date.'
+        };
+      }
+
       case 'neofetch': {
         return {
           output: `
@@ -1315,16 +1381,20 @@ Processing triggers for man-db...`
       }
 
       default: {
-        // Check if executable file like ./backup.sh
-        if (cmd.startsWith('./') || cmd.endsWith('.sh')) {
+        // Check if executable file like ./backup.sh, ./main, ./a.out
+        if (cmd.startsWith('./') || cmd.endsWith('.sh') || cmd.endsWith('.out')) {
           const scriptName = cmd.replace('./', '');
           const node = findNode(resolvePath(scriptName));
           if (node) {
             if (!node.permissions.includes('x')) {
               return { output: `bash: ${cmd}: Permission denied (run 'chmod +x ${scriptName}' first)`, isError: true };
             }
+            let outputText = node.content || `[EXEC]: Executed ${scriptName} successfully.`;
+            if (outputText.startsWith('[ELF 64-bit')) {
+              outputText = outputText.split('\n').slice(1).join('\n');
+            }
             return {
-              output: node.content || `[BASH]: Executed ${scriptName} successfully.`
+              output: outputText
             };
           }
           return { output: `bash: ${cmd}: No such file or directory`, isError: true };

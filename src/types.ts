@@ -3,10 +3,11 @@ export interface User {
   email: string;
   username: string;
   password?: string;
-  role: 'student' | 'admin';
+  role: 'student' | 'admin' | 'teacher' | 'instructor';
   isVerified: boolean;
   verificationCode?: string;
   resetToken?: string;
+  resetExpires?: number | null;
   avatar?: string;
   authProvider?: 'local' | 'google';
   createdAt: string;
@@ -57,6 +58,12 @@ export interface Document {
   originalMimeType?: string;
   images?: Array<{ url: string; caption?: string; alt?: string; page?: number }>;
   filePath?: string;
+  pageCount?: number;
+  diagrams?: any[];
+  downloadUrl?: string | null;
+  fileKey?: string | null;
+  createdAt?: string;
+  bookmarked?: boolean;
 }
 
 export interface ChatMessage {
@@ -66,6 +73,7 @@ export interface ChatMessage {
   timestamp: string;
   isRag?: boolean; // indicates if RAG context was used
   sources?: string[]; // retrieved document section titles
+  isError?: boolean; // indicates if the message is an error notification
 }
 
 export interface ChatSession {

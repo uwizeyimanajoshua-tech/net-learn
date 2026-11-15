@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Sparkles, BookOpen, Brain, GraduationCap, Layers, MessageSquare, 
   Shield, LogOut, LayoutGrid, Sun, Moon, AlertCircle, FileText, 
-  Menu, X, Landmark, RefreshCw, ChevronDown, ChevronRight, Bookmark, Play, HelpCircle,
+  Menu, X, Landmark, ChevronDown, ChevronRight, Bookmark, Play, HelpCircle,
   Terminal, Code2
 } from 'lucide-react';
 import AuthModal, { GoogleIcon } from './components/AuthModal.js';
@@ -18,6 +18,10 @@ import CertificatesShowcase from './components/CertificatesShowcase.js';
 import AboutUs from './components/AboutUs.js';
 import LinuxSimulator from './components/LinuxSimulator.js';
 import PythonSimulator from './components/PythonSimulator.js';
+import CProgrammingIDE from './components/CProgrammingIDE.js';
+import VideoLectures from './components/VideoLectures.js';
+import { collection, getDocs } from 'firebase/firestore';
+import { db as firestoreDb, handleFirestoreError, OperationType } from './firebase.js';
 import { Document, StudentProgress, CategoryName, CATEGORIES } from './types.js';
 import { SIDEBAR_CATEGORIES } from './data/chapters.js';
 import netLearnLogo from './assets/images/net_learn_logo_1784436382187.jpg';
@@ -63,6 +67,7 @@ export default function App() {
 
   // Core Datasets synced from DB
   const [documents, setDocuments] = useState<Document[]>([]);
+  const [documentsError, setDocumentsError] = useState<string | null>(null);
   const [progress, setProgress] = useState<StudentProgress | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isReadingDocument, setIsReadingDocument] = useState(false);
@@ -76,10 +81,156 @@ export default function App() {
     }
   }, [darkMode]);
 
-  // Ensure that when app is opened or refreshed, it always shows the top
+  // Ensure that when app is opened or refreshed, it reads URL search params and syncs with history
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get('tab');
+      const catParam = params.get('category');
+      const docParam = params.get('docId');
+      const searchParam = params.get('search');
+
+      if (tabParam) {
+        setActiveTab(tabParam);
+      } else if (docParam || catParam) {
+        setActiveTab('documents');
+      }
+
+      if (catParam) setNavFilterCategory(catParam as CategoryName);
+      if (docParam) setNavFilterDocId(docParam);
+      if (searchParam) setNavSearchQuery(searchParam);
+    } catch (e) {
+      console.warn('URL params init notice:', e);
+    }
+
+    const handlePopState = () => {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const t = params.get('tab') || 'dashboard';
+        const c = params.get('category');
+        const d = params.get('docId');
+        const s = params.get('search');
+        setActiveTab(t);
+        setNavFilterCategory(c ? (c as CategoryName) : undefined);
+        setNavFilterDocId(d || undefined);
+        setNavSearchQuery(s || undefined);
+      } catch (err) {
+        console.warn('PopState notice:', err);
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
   }, []);
+
+  // When active tab, category, or document changes, update title, meta description, and canonical URL dynamically for SEO
+  useEffect(() => {
+    let pageTitle = 'NET LEARN – Technical Learning & Systems Engineering';
+    let pageDesc = 'A premium educational platform styled after W3Schools, built for Networking, IT, Linux, Python, and Technology students featuring integrated interactive simulations, virtual labs, and exams.';
+
+    const matchedDoc = navFilterDocId ? documents.find(d => d.id === navFilterDocId) : null;
+
+    if (matchedDoc) {
+      pageTitle = `${matchedDoc.name} – ${matchedDoc.category} Course Note | NET LEARN`;
+      pageDesc = `Study ${matchedDoc.name} in ${matchedDoc.category}. Interactive W3Schools-style note with code examples, practice questions, and AI tutoring.`;
+    } else if (navFilterCategory) {
+      pageTitle = `${navFilterCategory} Technical Curriculum & Notes | NET LEARN`;
+      pageDesc = `Explore comprehensive ${navFilterCategory} course notes, structured lessons, interactive command sandboxes, and practice exercises.`;
+    } else {
+      const titles: Record<string, { title: string; desc: string }> = {
+        dashboard: {
+          title: 'NET LEARN – Home | Technical Learning & Systems Engineering',
+          desc: 'Study Networking, Linux operations, Active Directory administration, Cyber Security, and systems programming with interactive sandboxes and AI tutoring.'
+        },
+        c_ide: {
+          title: 'C Programming IDE & GCC Compiler | NET LEARN',
+          desc: 'Online C development environment with native GCC 12.3 compiler, x86_64 Intel assembly disassembly, heap memory tracking, and systems programming projects.'
+        },
+        documents: {
+          title: 'Technical Curriculum & Notes Library | NET LEARN',
+          desc: 'Browse 19 technical domains, W3Schools-styled chapter notes, executable code tutorials, and practice exercises.'
+        },
+        exams: {
+          title: 'Technical Practice Exams & Certification Simulator | NET LEARN',
+          desc: 'Simulate timed exams, Rwanda TVET board assessments, and CCNA/Linux certification quizzes with instant scoring and explanations.'
+        },
+        ai_chat: {
+          title: 'NIT AI Technical Mentorship & Copilot | NET LEARN',
+          desc: 'Consult your intelligent AI technical tutor grounded in Rwanda TVET curriculum, networking standards, and live systems documentation.'
+        },
+        linux_sim: {
+          title: 'Linux OS Terminal Simulator (Ubuntu 24.04 LTS) | NET LEARN',
+          desc: 'Interactive Ubuntu Linux bash terminal simulator with real command execution, file management, nginx auditing, and system diagnostics.'
+        },
+        python_sim: {
+          title: 'Python 3 & Machine Learning Execution Sandbox | NET LEARN',
+          desc: 'Write and run Python 3 scripts with NumPy, train linear regressions, evaluate classification decision trees, and view neural network loss curves.'
+        },
+        flashcards: {
+          title: 'Technical Flashcards & Active Recall Deck | NET LEARN',
+          desc: 'Master key networking, operating systems, and computing concepts with interactive 3D flippable study flashcards.'
+        },
+        videos: {
+          title: 'Video Lectures & Practical Labs | NET LEARN',
+          desc: 'Watch high-definition technical video lectures, lab demonstrations, and step-by-step systems engineering tutorials.'
+        },
+        community: {
+          title: 'Student & Faculty Community Forum | NET LEARN',
+          desc: 'Collaborate with technical students and instructors across East Africa, discuss troubleshooting challenges, and share solutions.'
+        },
+        certificates: {
+          title: 'Verified Course Certificates & Transcripts | NET LEARN',
+          desc: 'Verify student achievements, module completion progress, and credentials for technical certification courses.'
+        },
+        about: {
+          title: 'About NETECH – Africa’s Premier Technical Education Hub | NET LEARN',
+          desc: 'Learn about the NETECH educational mission, curriculum grounding standards, and our engineering team in Kigali, Rwanda.'
+        },
+        admin: {
+          title: 'Administrator Analytics & Curriculum Portal | NET LEARN',
+          desc: 'Administrative controls for course material uploads, user management, and student learning analytics.'
+        }
+      };
+
+      if (titles[activeTab]) {
+        pageTitle = titles[activeTab].title;
+        pageDesc = titles[activeTab].desc;
+      }
+    }
+
+    document.title = pageTitle;
+
+    // Update meta description
+    let metaDesc = document.querySelector('meta[name="description"]');
+    if (metaDesc) {
+      metaDesc.setAttribute('content', pageDesc);
+    }
+
+    // Update OpenGraph tags
+    let ogTitle = document.querySelector('meta[property="og:title"]');
+    if (ogTitle) ogTitle.setAttribute('content', pageTitle);
+
+    let ogDesc = document.querySelector('meta[property="og:description"]');
+    if (ogDesc) ogDesc.setAttribute('content', pageDesc);
+
+    let ogUrl = document.querySelector('meta[property="og:url"]');
+    if (ogUrl) ogUrl.setAttribute('content', window.location.href);
+
+    // Update Twitter tags
+    let twTitle = document.querySelector('meta[name="twitter:title"]');
+    if (twTitle) twTitle.setAttribute('content', pageTitle);
+
+    let twDesc = document.querySelector('meta[name="twitter:description"]');
+    if (twDesc) twDesc.setAttribute('content', pageDesc);
+
+    // Update Canonical URL
+    let canonical = document.querySelector('link[rel="canonical"]');
+    if (canonical) {
+      canonical.setAttribute('href', window.location.href);
+    }
+  }, [activeTab, navFilterCategory, navFilterDocId, documents]);
 
   // When active tab changes, scroll back to the top smoothly and reset reading state
   useEffect(() => {
@@ -97,24 +248,50 @@ export default function App() {
   }, [user]);
 
   const loadUserData = async () => {
+    setDocumentsError(null);
+    let loadedDocs: Document[] | null = null;
+
     try {
-      // Fetch documents
-      const docRes = await fetch('/api/documents');
+      // Primary: Fetch lightweight document catalog from API
+      const docRes = await fetch('/api/documents', { cache: 'no-store' });
       if (docRes.ok) {
         const docText = await docRes.text();
-        try {
-          const docData = JSON.parse(docText);
-          if (docData && Array.isArray(docData.documents)) {
-            setDocuments(docData.documents);
-          }
-        } catch (jsonErr) {
-          console.warn('Could not parse documents JSON:', jsonErr);
+        const docData = JSON.parse(docText);
+        if (docData && Array.isArray(docData.documents)) {
+          loadedDocs = docData.documents;
         }
       }
+    } catch (apiErr) {
+      console.warn('API /api/documents failed, falling back to Firestore:', apiErr);
+    }
 
+    // Fallback: Direct Firebase Firestore read if API returned error or unavailable
+    if (!loadedDocs) {
+      try {
+        const snapshot = await getDocs(collection(firestoreDb, 'documents'));
+        const fsDocs: Document[] = [];
+        snapshot.forEach(docSnap => {
+          fsDocs.push(docSnap.data() as Document);
+        });
+        loadedDocs = fsDocs;
+      } catch (fsErr: any) {
+        try {
+          handleFirestoreError(fsErr, OperationType.GET, 'documents');
+        } catch (handledErr: any) {
+          console.error('Firestore fallback failed:', handledErr);
+        }
+        setDocumentsError('Unable to reach document service. Please click Retry.');
+      }
+    }
+
+    if (loadedDocs) {
+      setDocuments(loadedDocs);
+    }
+
+    try {
       // Fetch student progress
       if (user?.id) {
-        const progressRes = await fetch(`/api/student/progress?userId=${user.id}`);
+        const progressRes = await fetch(`/api/student/progress?userId=${user.id}`, { cache: 'no-store' });
         if (progressRes.ok) {
           const progressText = await progressRes.text();
           try {
@@ -128,7 +305,7 @@ export default function App() {
         }
       }
     } catch (err) {
-      console.error('Error fetching user core datasets:', err);
+      console.error('Error fetching student progress:', err);
     }
   };
 
@@ -180,7 +357,16 @@ export default function App() {
 
   const handleDeleteDocument = async (docId: string) => {
     try {
-      const res = await fetch(`/api/documents/${docId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/documents/${docId}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': user?.id || '',
+          'x-user-role': user?.role || '',
+          'x-user-email': user?.email || ''
+        },
+        body: JSON.stringify({ userId: user?.id })
+      });
       if (res.ok) {
         setDocuments(prev => prev.filter(d => d.id !== docId));
         loadUserData();
@@ -190,12 +376,40 @@ export default function App() {
     }
   };
 
-  const handleNavigateToSection = (section: string, filterCategory?: CategoryName, filterDocId?: string, searchQuery?: string) => {
+  const handleNavigateToSection = (
+    section: string,
+    filterCategory?: CategoryName,
+    filterDocId?: string,
+    searchQuery?: string,
+    pushHistory: boolean = true
+  ) => {
     setNavFilterCategory(filterCategory);
     setNavFilterDocId(filterDocId);
     setNavSearchQuery(searchQuery);
     setActiveTab(section);
     setMobileMenuOpen(false);
+
+    if (pushHistory) {
+      try {
+        const params = new URLSearchParams();
+        if (section !== 'dashboard') params.set('tab', section);
+        if (filterCategory) params.set('category', filterCategory);
+        if (filterDocId) params.set('docId', filterDocId);
+        if (searchQuery) params.set('search', searchQuery);
+
+        const newQuery = params.toString();
+        const targetSearch = newQuery ? `?${newQuery}` : window.location.pathname;
+        if (window.location.search !== (newQuery ? `?${newQuery}` : '')) {
+          window.history.pushState(
+            { tab: section, category: filterCategory, docId: filterDocId, search: searchQuery },
+            '',
+            targetSearch
+          );
+        }
+      } catch (historyErr) {
+        console.warn('History push notice:', historyErr);
+      }
+    }
   };
 
 
@@ -304,15 +518,6 @@ export default function App() {
 
         {/* Global Controls & Theme options (Right) */}
         <div className="flex items-center gap-3">
-          {/* Sync Button */}
-          <button
-            onClick={loadUserData}
-            className="p-2 rounded-xl bg-slate-900/40 border border-white/5 hover:bg-white/5 text-gray-400 cursor-pointer transition-all active:scale-95"
-            title="Refresh Curriculum Materials"
-          >
-            <RefreshCw className="w-4 h-4" />
-          </button>
-
           {/* Sign in / Access Badge */}
           {user.id !== 'usr_student' ? (
             <div className="flex items-center gap-2">
@@ -365,7 +570,7 @@ export default function App() {
           { name: 'HTML', category: 'Programming', docId: 'prog_1' },
           { name: 'CSS', category: 'Programming', docId: 'prog_1' },
           { name: 'JAVASCRIPT', category: 'Programming', docId: 'prog_1' },
-          { name: 'C PROGRAMMING', category: 'C Programming', docId: 'c_prog_1' },
+          { name: 'C PROGRAMMING', category: 'C Programming', docId: 'c_prog_1', action: () => handleNavigateToSection('c_ide') },
           { name: 'PYTHON', category: 'Programming', docId: 'prog_1', action: () => handleNavigateToSection('python_sim') },
           { name: 'DATABASE', category: 'Database', docId: 'db_1' },
           { name: 'LINUX', category: 'Linux', docId: 'lin_1', action: () => handleNavigateToSection('linux_sim') },
@@ -497,6 +702,7 @@ export default function App() {
               <div className="space-y-1 pt-1.5">
                 {[
                   { id: 'dashboard', label: 'Study Hub', action: () => handleNavigateToSection('dashboard') },
+                  { id: 'c_ide', label: '⚡ C Programming IDE', action: () => handleNavigateToSection('c_ide') },
                   { id: 'linux_sim', label: '🖥️ Linux OS Simulator', action: () => handleNavigateToSection('linux_sim') },
                   { id: 'python_sim', label: '🐍 Python & ML Runner', action: () => handleNavigateToSection('python_sim') },
                   { id: 'notes', label: 'Notes and Highlights', action: () => handleNavigateToSection('documents') },
@@ -511,6 +717,7 @@ export default function App() {
                 ].map((item) => {
                   let isCurrent = false;
                   if (item.id === 'dashboard' && activeTab === 'dashboard') isCurrent = true;
+                  if (item.id === 'c_ide' && activeTab === 'c_ide') isCurrent = true;
                   if (item.id === 'linux_sim' && activeTab === 'linux_sim') isCurrent = true;
                   if (item.id === 'python_sim' && activeTab === 'python_sim') isCurrent = true;
                   if (item.id === 'modules' && activeTab === 'documents') isCurrent = true;
@@ -566,6 +773,8 @@ export default function App() {
           {activeTab === 'documents' && (
             <DocumentViewer 
               documents={documents} 
+              documentsError={documentsError}
+              onRetryLoad={loadUserData}
               onUpload={loadUserData} 
               onDelete={handleDeleteDocument} 
               onToggleBookmark={handleToggleBookmark} 
@@ -576,6 +785,7 @@ export default function App() {
               initialSearchQuery={navSearchQuery}
               darkMode={darkMode} 
               userRole={user.role}
+              userEmail={user.email}
               sidebarOpen={sidebarOpen}
               onViewingDocChange={setIsReadingDocument}
             />
@@ -640,13 +850,21 @@ export default function App() {
             />
           )}
 
+          {activeTab === 'c_ide' && (
+            <CProgrammingIDE 
+              darkMode={darkMode} 
+              onNavigateToTab={handleNavigateToSection} 
+              user={user} 
+            />
+          )}
+
           {activeTab === 'linux_sim' && (
             <div className="space-y-6 animate-fade-in text-left">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                  <h2 className={`font-display text-2xl sm:text-3xl font-black tracking-tight ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                  <h1 className={`font-display text-2xl sm:text-3xl font-black tracking-tight ${darkMode ? 'text-white' : 'text-gray-900'}`}>
                     Linux OS Terminal Simulator
-                  </h2>
+                  </h1>
                   <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider mt-0.5">
                     Ubuntu 24.04 LTS environment with interactive bash commands, filesystem navigation, nginx log auditing, and system telemetry
                   </p>
@@ -666,9 +884,9 @@ export default function App() {
             <div className="space-y-6 animate-fade-in text-left">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                  <h2 className={`font-display text-2xl sm:text-3xl font-black tracking-tight ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                  <h1 className={`font-display text-2xl sm:text-3xl font-black tracking-tight ${darkMode ? 'text-white' : 'text-gray-900'}`}>
                     Python & Machine Learning Execution Simulator
-                  </h2>
+                  </h1>
                   <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider mt-0.5">
                     Write and execute Python 3.12, train linear regressions, plot scatter charts, inspect confusion matrices, and evaluate neural net convergence
                   </p>
@@ -685,50 +903,11 @@ export default function App() {
           )}
 
           {activeTab === 'videos' && (
-            <div className="space-y-6 animate-fade-in text-left">
-              <div>
-                <h2 className={`font-display text-2xl sm:text-3xl font-black tracking-tight ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                  Academic Video Lectures
-                </h2>
-                <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider mt-0.5">
-                  Stream high-quality recorded sessions covering core networking and server administration domains
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {[
-                  { id: 'vid_1', title: 'OSI 7-Layer Model Architecture Explained', duration: '14:20', instructor: 'Instructor Joshua', views: '2.4K views', category: 'Networking' },
-                  { id: 'vid_2', title: 'Cisco Router Configuration & VLAN Subnetting', duration: '22:15', instructor: 'Instructor Joshua', views: '1.9K views', category: 'Networking' },
-                  { id: 'vid_3', title: 'Linux Filesystem Hierarchy & Basic Pipes', duration: '18:40', instructor: 'Eric S.', views: '1.2K views', category: 'Linux' },
-                  { id: 'vid_4', title: 'Active Directory Domain Setup in Windows Server', duration: '28:50', instructor: 'Kevin M.', views: '840 views', category: 'Window Server' },
-                  { id: 'vid_5', title: 'WPA3 Wireless Handshakes & Security Key Exchanges', duration: '16:10', instructor: 'Eng. Neza Mugabo', views: '3.1K views', category: 'Cyber Security' }
-                ].map((vid) => (
-                  <div key={vid.id} className={`p-4 rounded-2xl border ${darkMode ? 'bg-elegant-card border-white/5' : 'bg-white border-gray-150 shadow-sm'} space-y-3`}>
-                    <div className="aspect-video w-full rounded-xl bg-slate-900 flex items-center justify-center relative overflow-hidden group">
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent z-10" />
-                      <div className="p-3 bg-teal-500 rounded-full text-white shadow-md z-20 group-hover:scale-110 transition-all cursor-pointer">
-                        <Play className="w-5 h-5 fill-current" />
-                      </div>
-                      <span className="absolute bottom-2.5 right-2.5 px-2 py-0.5 bg-black/75 text-[10px] font-mono font-bold text-white rounded z-20">
-                        {vid.duration}
-                      </span>
-                    </div>
-                    <div className="space-y-1">
-                      <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-teal-500/10 text-teal-400">
-                        {vid.category}
-                      </span>
-                      <h3 className={`font-display font-black text-xs sm:text-sm tracking-tight leading-snug ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                        {vid.title}
-                      </h3>
-                      <div className="flex items-center justify-between text-[10px] text-gray-500 font-semibold">
-                        <span>{vid.instructor}</span>
-                        <span>{vid.views}</span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <VideoLectures 
+              darkMode={darkMode} 
+              onNavigateToTab={handleNavigateToSection} 
+              user={user} 
+            />
           )}
 
           {activeTab === 'admin' && user.role === 'admin' && (
@@ -738,6 +917,27 @@ export default function App() {
               onRefreshDocs={loadUserData} 
               darkMode={darkMode} 
             />
+          )}
+
+          {/* 404 Not Found Fallback */}
+          {!['dashboard', 'documents', 'c_ide', 'linux_sim', 'python_sim', 'ai_chat', 'teacher', 'exams', 'flashcards', 'community', 'certificates', 'about', 'videos', 'admin'].includes(activeTab) && (
+            <div className="py-20 text-center space-y-4 max-w-md mx-auto">
+              <div className="w-16 h-16 rounded-2xl bg-teal-500/10 text-teal-600 dark:text-teal-400 flex items-center justify-center mx-auto text-2xl font-bold font-mono">
+                404
+              </div>
+              <h1 className={`font-display text-2xl sm:text-3xl font-black ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                Page Not Found
+              </h1>
+              <p className="text-xs text-gray-500 font-medium">
+                The technical module, document, or simulator tab you requested does not exist or has been relocated.
+              </p>
+              <button
+                onClick={() => handleNavigateToSection('dashboard')}
+                className="px-5 py-2.5 rounded-xl text-xs font-bold bg-brand-primary text-white hover:bg-brand-primary-hover shadow-sm transition cursor-pointer"
+              >
+                Return to Study Hub &gt;
+              </button>
+            </div>
           )}
         </main>
 

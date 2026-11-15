@@ -102,7 +102,17 @@ export default function FlashcardsViewer({ userId, documents, initialDocId, dark
   const masteredFilteredCount = filteredCards.filter(c => c.isMastered).length;
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-fade-in text-left">
+    <div className="space-y-6 animate-fade-in text-left">
+      <div className="pb-2 border-b border-gray-200 dark:border-white/10">
+        <h1 className={`font-display text-2xl sm:text-3xl font-black tracking-tight ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+          Technical Flashcards & Active Recall Deck
+        </h1>
+        <p className="text-xs text-gray-500 dark:text-gray-400 font-medium mt-1">
+          Master networking, operating systems, and computing concepts with interactive 3D flippable study flashcards
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
       {/* LEFT COLUMN: Setup Deck selection */}
       <div className="lg:col-span-1 space-y-6">
         <div className={`p-6 rounded-3xl border ${darkMode ? 'bg-elegant-card border-white/5' : 'bg-white border-gray-100'} shadow-sm space-y-6`}>
@@ -275,5 +285,6 @@ export default function FlashcardsViewer({ userId, documents, initialDocId, dark
         </div>
       </div>
     </div>
+  </div>
   );
 }

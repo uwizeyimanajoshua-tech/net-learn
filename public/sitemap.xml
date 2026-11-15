@@ -3,65 +3,205 @@
         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:schemaLocation="http://www.sitemaps.org/schemas/sitemap/0.9
         http://www.sitemaps.org/schemas/sitemap/0.9/sitemap.xsd">
+  <!-- Primary Application Views -->
   <url>
-    <loc>https://ais-pre-vgu6qxai3ampxngqmskknv-28077261285.europe-west1.run.app/</loc>
-    <lastmod>2026-10-19</lastmod>
+    <loc>https://net-learn-psi.vercel.app/</loc>
+    <lastmod>2026-11-02</lastmod>
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://ais-pre-vgu6qxai3ampxngqmskknv-28077261285.europe-west1.run.app/?tab=documents</loc>
-    <lastmod>2026-10-19</lastmod>
+    <loc>https://net-learn-psi.vercel.app/?tab=c_ide</loc>
+    <lastmod>2026-11-02</lastmod>
     <changefreq>weekly</changefreq>
-    <priority>0.9</priority>
+    <priority>0.95</priority>
   </url>
   <url>
-    <loc>https://ais-pre-vgu6qxai3ampxngqmskknv-28077261285.europe-west1.run.app/?tab=linux_sim</loc>
-    <lastmod>2026-10-19</lastmod>
+    <loc>https://net-learn-psi.vercel.app/?tab=linux_sim</loc>
+    <lastmod>2026-11-02</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.95</priority>
+  </url>
+  <url>
+    <loc>https://net-learn-psi.vercel.app/?tab=python_sim</loc>
+    <lastmod>2026-11-02</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.95</priority>
+  </url>
+  <url>
+    <loc>https://net-learn-psi.vercel.app/?tab=documents</loc>
+    <lastmod>2026-11-02</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.90</priority>
+  </url>
+  <url>
+    <loc>https://net-learn-psi.vercel.app/?tab=exams</loc>
+    <lastmod>2026-11-02</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://net-learn-psi.vercel.app/?tab=flashcards</loc>
+    <lastmod>2026-11-02</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.80</priority>
+  </url>
+  <url>
+    <loc>https://net-learn-psi.vercel.app/?tab=videos</loc>
+    <lastmod>2026-11-02</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://net-learn-psi.vercel.app/?tab=community</loc>
+    <lastmod>2026-11-02</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.80</priority>
+  </url>
+  <url>
+    <loc>https://net-learn-psi.vercel.app/?tab=certificates</loc>
+    <lastmod>2026-11-02</lastmod>
     <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
+    <priority>0.75</priority>
   </url>
   <url>
-    <loc>https://ais-pre-vgu6qxai3ampxngqmskknv-28077261285.europe-west1.run.app/?tab=python_sim</loc>
-    <lastmod>2026-10-19</lastmod>
+    <loc>https://net-learn-psi.vercel.app/?tab=about</loc>
+    <lastmod>2026-11-02</lastmod>
     <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
+    <priority>0.75</priority>
   </url>
   <url>
-    <loc>https://ais-pre-vgu6qxai3ampxngqmskknv-28077261285.europe-west1.run.app/?tab=exams</loc>
-    <lastmod>2026-10-19</lastmod>
+    <loc>https://net-learn-psi.vercel.app/?tab=ai_chat</loc>
+    <lastmod>2026-11-02</lastmod>
     <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
+    <priority>0.80</priority>
   </url>
+
+  <!-- All 19 Technical Syllabi & Category Tracks -->
   <url>
-    <loc>https://ais-pre-vgu6qxai3ampxngqmskknv-28077261285.europe-west1.run.app/?tab=flashcards</loc>
-    <lastmod>2026-10-19</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
-  </url>
-  <!-- Category Syllabi -->
-  <url>
-    <loc>https://ais-pre-vgu6qxai3ampxngqmskknv-28077261285.europe-west1.run.app/?category=Networking</loc>
-    <lastmod>2026-10-19</lastmod>
+    <loc>https://net-learn-psi.vercel.app/?category=Networking</loc>
+    <lastmod>2026-11-02</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.85</priority>
   </url>
   <url>
-    <loc>https://ais-pre-vgu6qxai3ampxngqmskknv-28077261285.europe-west1.run.app/?category=Linux</loc>
-    <lastmod>2026-10-19</lastmod>
+    <loc>https://net-learn-psi.vercel.app/?category=Linux</loc>
+    <lastmod>2026-11-02</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.85</priority>
   </url>
   <url>
-    <loc>https://ais-pre-vgu6qxai3ampxngqmskknv-28077261285.europe-west1.run.app/?category=Window%20Server</loc>
-    <lastmod>2026-10-19</lastmod>
+    <loc>https://net-learn-psi.vercel.app/?category=Window%20Server</loc>
+    <lastmod>2026-11-02</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.85</priority>
   </url>
   <url>
-    <loc>https://ais-pre-vgu6qxai3ampxngqmskknv-28077261285.europe-west1.run.app/?category=Cyber%20Security</loc>
-    <lastmod>2026-10-19</lastmod>
+    <loc>https://net-learn-psi.vercel.app/?category=Cyber%20Security</loc>
+    <lastmod>2026-11-02</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://net-learn-psi.vercel.app/?category=C%20Programming</loc>
+    <lastmod>2026-11-02</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://net-learn-psi.vercel.app/?category=Machine%20Learning</loc>
+    <lastmod>2026-11-02</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://net-learn-psi.vercel.app/?category=Database</loc>
+    <lastmod>2026-11-02</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://net-learn-psi.vercel.app/?category=Cloud%20Computing</loc>
+    <lastmod>2026-11-02</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://net-learn-psi.vercel.app/?category=AI</loc>
+    <lastmod>2026-11-02</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://net-learn-psi.vercel.app/?category=Fiber%20Optics</loc>
+    <lastmod>2026-11-02</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.80</priority>
+  </url>
+  <url>
+    <loc>https://net-learn-psi.vercel.app/?category=Wireless%20Indoor</loc>
+    <lastmod>2026-11-02</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.80</priority>
+  </url>
+  <url>
+    <loc>https://net-learn-psi.vercel.app/?category=Wireless%20Outdoor</loc>
+    <lastmod>2026-11-02</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.80</priority>
+  </url>
+  <url>
+    <loc>https://net-learn-psi.vercel.app/?category=IoT%20System%20Development</loc>
+    <lastmod>2026-11-02</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.80</priority>
+  </url>
+  <url>
+    <loc>https://net-learn-psi.vercel.app/?category=IoT%20System%20Installation</loc>
+    <lastmod>2026-11-02</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.80</priority>
+  </url>
+  <url>
+    <loc>https://net-learn-psi.vercel.app/?category=VoIP</loc>
+    <lastmod>2026-11-02</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.80</priority>
+  </url>
+  <url>
+    <loc>https://net-learn-psi.vercel.app/?category=Zero%20Client%20with%20NComputing</loc>
+    <lastmod>2026-11-02</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.80</priority>
+  </url>
+  <url>
+    <loc>https://net-learn-psi.vercel.app/?category=Technical%20Drawing</loc>
+    <lastmod>2026-11-02</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.80</priority>
+  </url>
+  <url>
+    <loc>https://net-learn-psi.vercel.app/?category=Mathematics</loc>
+    <lastmod>2026-11-02</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.80</priority>
+  </url>
+  <url>
+    <loc>https://net-learn-psi.vercel.app/?category=Physics</loc>
+    <lastmod>2026-11-02</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.80</priority>
+  </url>
+  <url>
+    <loc>https://net-learn-psi.vercel.app/?category=Electronics</loc>
+    <lastmod>2026-11-02</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.80</priority>
+  </url>
+  <url>
+    <loc>https://net-learn-psi.vercel.app/?category=Electricity</loc>
+    <lastmod>2026-11-02</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.80</priority>
   </url>
 </urlset>

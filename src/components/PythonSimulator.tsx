@@ -306,19 +306,47 @@ export default function PythonSimulator({
   const handleRunPython = async () => {
     if (!code.trim()) return;
     setIsRunning(true);
-    setTerminalOutput('[PYTHON RUNNER]: Initializing runtime environment...\n');
+    setTerminalOutput('[PYTHON 3.12 NATIVE RUNNER]: Initializing execution environment...\n');
 
     const startTime = performance.now();
 
     try {
-      // 1. Client-Side Python & ML execution engine
+      // 1. Execute against real backend Python 3 runtime
+      let serverStdout = '';
+      let isServerSuccess = false;
+      try {
+        const res = await fetch('/api/python/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && (data.stdout !== undefined || data.stderr !== undefined)) {
+            serverStdout = data.stdout || '';
+            if (data.stderr) {
+              serverStdout += (serverStdout ? '\n' : '') + data.stderr;
+            }
+            isServerSuccess = true;
+          }
+        }
+      } catch (backendErr) {
+        console.warn('Backend Python execution error, falling back to local engine:', backendErr);
+      }
+
+      // 2. Extract visual plot data & variable structures
       const executionResult = executePythonLocally(code);
 
       const endTime = performance.now();
       const elapsed = Math.round(endTime - startTime);
       setExecutionTimeMs(elapsed);
 
-      setTerminalOutput(executionResult.stdout);
+      // Prefer genuine server runtime stdout when successful, or fallback gracefully
+      const finalOutput = isServerSuccess
+        ? (serverStdout || 'Process finished with exit code 0 (no output)')
+        : executionResult.stdout;
+
+      setTerminalOutput(finalOutput);
       setVariables(executionResult.variables);
       setPlotData(executionResult.plot);
 
@@ -329,7 +357,7 @@ export default function PythonSimulator({
       }
 
       // Also request Gemini background explanation if user desires high-level guidance
-      requestAiExplanation(code, executionResult.stdout);
+      requestAiExplanation(code, finalOutput);
 
     } catch (err: any) {
       setTerminalOutput(`Traceback (most recent call last):\n  File "main.py", line 1, in <module>\nSyntaxError: ${err.message || 'Execution error'}`);

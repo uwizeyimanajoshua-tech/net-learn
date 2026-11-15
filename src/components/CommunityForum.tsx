@@ -223,9 +223,9 @@ export default function CommunityForum({ darkMode, userId }: CommunityForumProps
       {/* HEADER BAR */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className={`font-display text-2xl sm:text-3xl font-black tracking-tight ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-            Rwanda Tech Community Hub
-          </h2>
+          <h1 className={`font-display text-2xl sm:text-3xl font-black tracking-tight ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+            Rwanda Tech Community Forum & Peer Discussions
+          </h1>
           <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider mt-0.5">
             Share ideas, solve practical labs, and collaborate with peer students & NIT AI
           </p>

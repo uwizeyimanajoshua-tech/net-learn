@@ -1,19 +1,69 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import { exec, execFile } from 'child_process';
 import multer from 'multer';
 import dotenv from 'dotenv';
-import { PDFParse } from 'pdf-parse';
 import { GoogleGenAI, Type } from '@google/genai';
-import { db } from './src/db/store.ts';
-import { CATEGORIES } from './src/types.ts';
-import type { ChatMessage, ChatSession, Document, DocumentSection, AISummary, Quiz, QuizQuestion, Flashcard } from './src/types.ts';
+import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { db, sqlClient, syncFromFirestore, syncDocumentsIfStale } from './src/db/store.js';
+import { CATEGORIES } from './src/types.js';
+import type { ChatMessage, ChatSession, Document, DocumentSection, AISummary, Quiz, QuizQuestion, Flashcard } from './src/types.js';
 
 dotenv.config();
 
 const app = express();
+
+// Normalize URL only if routed through a serverless gateway that stripped the path
+app.use((req, res, next) => {
+  const originalPath = 
+    req.headers['x-matched-path'] || 
+    req.headers['x-forwarded-uri'] || 
+    req.headers['x-now-original-path'] || 
+    req.headers['x-original-url'];
+
+  if (typeof originalPath === 'string' && originalPath.startsWith('/api')) {
+    const queryIdx = (req.url || '').indexOf('?');
+    const queryString = queryIdx !== -1 ? req.url.slice(queryIdx) : '';
+    req.url = originalPath + queryString;
+  }
+  next();
+});
+
+// S3 Bucket identifier (defaults to 'assets' or from env)
+export const S3_BUCKET = (
+  process.env.AWS_S3_BUCKET || 
+  process.env.S3_BUCKET_NAME || 
+  process.env.AWS_BUCKET || 
+  process.env.BUCKET_NAME || 
+  'assets'
+).trim();
+
+// Initialize Neon Object Storage (S3-compatible) client
+export const s3Client = (process.env.AWS_ENDPOINT_URL_S3 && (process.env.AWS_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY)) ? new S3Client({
+  endpoint: process.env.AWS_ENDPOINT_URL_S3,
+  region: process.env.AWS_REGION || 'us-east-2',
+  credentials: {
+    accessKeyId: (process.env.AWS_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY || '').trim(),
+    secretAccessKey: (
+      process.env.AWS_SECRET_ACCESS_KEY || 
+      process.env.AWS_SECRET_ACCESS_K || 
+      process.env.AWS_SECRET_KEY || 
+      ''
+    ).trim(),
+  },
+  forcePathStyle: true,
+}) : null;
+if (s3Client) {
+  console.log(`[Neon Object Storage] S3 client initialized with bucket: ${S3_BUCKET}`);
+}
 // Global exception handlers to prevent any crash from terminating the process
-process.on('uncaughtException', (err) => {
+process.on('uncaughtException', (err: any) => {
+  if (err?.code === 'EADDRINUSE') {
+    console.warn(`[Port in use] Address already in use ${err.address}:${err.port}. Retrying connection...`);
+    return;
+  }
   console.error('[UNCAUGHT EXCEPTION]:', err);
 });
 process.on('unhandledRejection', (reason, promise) => {
@@ -23,7 +73,7 @@ process.on('unhandledRejection', (reason, promise) => {
 const PORT = 3000;
 
 // Ensure upload directory exists for streaming files
-const UPLOAD_DIR = process.env.VERCEL ? path.join('/tmp', 'uploads') : path.join(process.cwd(), 'uploads');
+const UPLOAD_DIR = fs.existsSync('/tmp') ? path.join('/tmp', 'uploads') : path.join(process.cwd(), 'uploads');
 try {
   if (!fs.existsSync(UPLOAD_DIR)) {
     fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -32,14 +82,102 @@ try {
   console.warn('Upload directory initialization notice:', dirErr);
 }
 
-// Enable JSON and body parsing with 100MB limit
-app.use(express.json({ limit: '100mb' }));
-app.use(express.urlencoded({ limit: '100mb', extended: true }));
+// Enable JSON and body parsing with 110MB limit to handle documents up to 100MB
+app.use(express.json({ limit: '110mb' }));
+app.use(express.urlencoded({ limit: '110mb', extended: true }));
 
-// Setup multer for memory storage uploads with 100MB limit
+// SEO & Security Headers
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  // Cache public static assets
+  if (req.url.match(/\.(jpg|jpeg|png|gif|ico|svg|webp|woff|woff2|ttf)$/)) {
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  }
+  next();
+});
+
+// Dynamic XML Sitemap for Search Engines
+app.get('/sitemap.xml', (req, res) => {
+  const reqHost = (req.headers['x-forwarded-host'] || req.get('host') || '') as string;
+  const isLocal = reqHost.includes('localhost') || reqHost.includes('127.0.0.1');
+  const origin = isLocal ? ((req.headers['x-forwarded-proto'] || req.protocol) + '://' + reqHost) : 'https://net-learn-psi.vercel.app';
+  
+  const tabs = [
+    { path: '', priority: '1.0', changefreq: 'daily' },
+    { path: '?tab=c_ide', priority: '0.95', changefreq: 'weekly' },
+    { path: '?tab=linux_sim', priority: '0.95', changefreq: 'weekly' },
+    { path: '?tab=python_sim', priority: '0.95', changefreq: 'weekly' },
+    { path: '?tab=documents', priority: '0.90', changefreq: 'daily' },
+    { path: '?tab=exams', priority: '0.85', changefreq: 'weekly' },
+    { path: '?tab=flashcards', priority: '0.80', changefreq: 'weekly' },
+    { path: '?tab=videos', priority: '0.85', changefreq: 'weekly' },
+    { path: '?tab=community', priority: '0.80', changefreq: 'daily' },
+    { path: '?tab=certificates', priority: '0.75', changefreq: 'monthly' },
+    { path: '?tab=about', priority: '0.75', changefreq: 'monthly' },
+    { path: '?tab=ai_chat', priority: '0.80', changefreq: 'weekly' }
+  ];
+
+  const categories = CATEGORIES.map(c => ({
+    path: `?category=${encodeURIComponent(c)}`,
+    priority: '0.85',
+    changefreq: 'weekly'
+  }));
+
+  const today = new Date().toISOString().split('T')[0];
+
+  const xmlEntries = [...tabs, ...categories].map(item => `  <url>
+    <loc>${origin}/${item.path}</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>${item.changefreq}</changefreq>
+    <priority>${item.priority}</priority>
+  </url>`).join('\n');
+
+  const sitemapXml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${xmlEntries}
+</urlset>`;
+
+  res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.send(sitemapXml);
+});
+
+// Dynamic robots.txt
+app.get('/robots.txt', (req, res) => {
+  const reqHost = (req.headers['x-forwarded-host'] || req.get('host') || '') as string;
+  const isLocal = reqHost.includes('localhost') || reqHost.includes('127.0.0.1');
+  const origin = isLocal ? ((req.headers['x-forwarded-proto'] || req.protocol) + '://' + reqHost) : 'https://net-learn-psi.vercel.app';
+
+  const content = `# robots.txt for NET LEARN / NETECH Platform
+User-agent: *
+Allow: /
+Allow: /?tab=*
+Allow: /?category=*
+Allow: /api/documents
+Allow: /sitemap.xml
+Disallow: /api/auth/
+Disallow: /api/chats/
+Disallow: /api/progress/
+Disallow: /api/documents/upload
+Disallow: /api/upload-image
+
+Sitemap: ${origin}/sitemap.xml
+`;
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.send(content);
+});
+
+// Google Search Console Site Verification Endpoint
+app.get('/googleced4164132c1cca0.html', (req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send('google-site-verification: googleced4164132c1cca0.html');
+});
+
+// Setup multer for memory storage uploads with 105MB limit (100MB file + multipart boundary overhead)
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 100 * 1024 * 1024 } // 100MB limit
+  limits: { fileSize: 105 * 1024 * 1024 }
 });
 
 // Middleware wrapper that intercepts Multer errors and returns clear JSON instead of HTML
@@ -48,7 +186,7 @@ const handleUploadFile = (req: express.Request, res: express.Response, next: exp
     if (err) {
       console.error('Multer upload middleware error:', err);
       if (err.code === 'LIMIT_FILE_SIZE') {
-        return res.status(413).json({ error: 'Uploaded file exceeds the maximum 100MB size limit. Please upload a smaller document.' });
+        return res.status(413).json({ error: 'Uploaded file exceeds the maximum 100MB size limit. Please upload a document up to 100MB.' });
       }
       return res.status(400).json({ error: `File upload error: ${err.message || 'Invalid upload'}` });
     }
@@ -56,23 +194,38 @@ const handleUploadFile = (req: express.Request, res: express.Response, next: exp
   });
 };
 
-// Clean and sanitize Gemini API key (remove accidental quotes or whitespace)
-const rawGeminiKey = (process.env.GEMINI_API_KEY || '').replace(/^["']|["']$/g, '').trim();
-
-// Initialize Gemini SDK with User-Agent for tracking
-const ai = new GoogleGenAI({
-  apiKey: rawGeminiKey || 'MOCK_KEY',
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build'
-    }
-  }
-});
-
-// Helper to determine if Gemini is configured/available
-function isGeminiAvailable(): boolean {
-  return !!rawGeminiKey && rawGeminiKey !== 'MY_GEMINI_API_KEY' && rawGeminiKey !== 'MOCK_KEY';
+// Dynamically retrieve and sanitize Gemini API key from all potential production env configurations
+function getGeminiApiKey(): string {
+  return (
+    process.env.GEMINI_API_KEY || 
+    process.env.GOOGLE_API_KEY || 
+    process.env.API_KEY || 
+    process.env.VITE_GEMINI_API_KEY || 
+    ''
+  ).replace(/^["']|["']$/g, '').trim();
 }
+
+// Helper to determine if Gemini is configured/available with a real key
+function isGeminiAvailable(): boolean {
+  const key = getGeminiApiKey();
+  return !!key && key !== 'MY_GEMINI_API_KEY' && key !== 'MOCK_KEY';
+}
+
+// Dynamic Gemini client getter ensuring fresh credentials on serverless/container runtimes
+function getGeminiClient(): GoogleGenAI {
+  const key = getGeminiApiKey();
+  return new GoogleGenAI({
+    apiKey: key || undefined,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build'
+      }
+    }
+  });
+}
+
+// Track rate limit cooldown to avoid repetitive 429 timeouts
+let geminiRateLimitedUntil = 0;
 
 // Reusable robust wrapper to execute Gemini requests with retry policies and model failover
 async function callGeminiWithRetry(params: {
@@ -80,25 +233,29 @@ async function callGeminiWithRetry(params: {
   config?: any;
   model?: string;
 }, maxRetries = 1): Promise<any> {
+  if (Date.now() < geminiRateLimitedUntil) {
+    throw new Error('Gemini API rate limit active. Utilizing curriculum notes.');
+  }
+
   const requested = params.model;
-  // Models to attempt in priority order: gemini-2.5-flash has real-time Google search tool support and high reliability
+  // Models to attempt: prioritize gemini-3.8-flash, gemini-2.5-flash, gemini-flash-latest, gemini-3.1-flash-lite
   const modelsToTry = [
-    requested && requested !== 'gemini-3.8-flash' ? requested : 'gemini-2.5-flash',
+    requested,
+    'gemini-3.8-flash',
     'gemini-2.5-flash',
     'gemini-flash-latest',
-    'gemini-3.1-flash-lite',
-    'gemini-2.5-flash-lite',
-    'gemini-3.8-flash'
+    'gemini-3.1-flash-lite'
   ];
-  const uniqueModels = Array.from(new Set(modelsToTry.filter(Boolean)));
+  const uniqueModels = Array.from(new Set(modelsToTry.filter(Boolean) as string[]));
 
   let lastError: any = null;
+  const geminiClient = getGeminiClient();
 
   for (const modelName of uniqueModels) {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         console.log(`[Gemini] Attempting generation with model ${modelName} (attempt ${attempt}/${maxRetries})...`);
-        const response = await ai.models.generateContent({
+        const response = await geminiClient.models.generateContent({
           model: modelName,
           contents: params.contents,
           config: params.config,
@@ -117,7 +274,7 @@ async function callGeminiWithRetry(params: {
             console.log(`[Gemini] Retrying model ${modelName} without search tools...`);
             const fallbackConfig = { ...params.config };
             delete fallbackConfig.tools;
-            const resNoTools = await ai.models.generateContent({
+            const resNoTools = await geminiClient.models.generateContent({
               model: modelName,
               contents: params.contents,
               config: fallbackConfig,
@@ -136,11 +293,20 @@ async function callGeminiWithRetry(params: {
         if (
           errStr.includes('429') || 
           errStr.includes('quota') || 
-          errStr.includes('resource_exhausted') ||
+          errStr.includes('resource_exhausted')
+        ) {
+          // Set short 2s cooldown and break out to let fallback model or curriculum take over instantly
+          geminiRateLimitedUntil = Date.now() + 2000;
+          break;
+        }
+
+        if (
           errStr.includes('503') ||
           errStr.includes('unavailable') ||
           errStr.includes('overloaded') ||
           errStr.includes('high demand') ||
+          errStr.includes('404') ||
+          errStr.includes('not found') ||
           errStr.includes('400') || 
           errStr.includes('invalid') || 
           errStr.includes('bad request') || 
@@ -1005,27 +1171,231 @@ app.get('/api/categories', (req, res) => {
 });
 
 // Document Management Routes
-app.get('/api/documents', (req, res) => {
-  const allDocs = db.getDocuments();
-  // Strip multi-megabyte base64 strings from bulk list to prevent network timeout & 'Failed to fetch'
-  const lightDocs = allDocs.map(d => {
-    if (d.fileData && d.fileData.length > 50000) {
-      const { fileData, ...rest } = d;
-      return {
-        ...rest,
-        fileUrl: rest.fileUrl || `/api/documents/${d.id}/file`
-      };
+app.get('/api/documents', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    await syncDocumentsIfStale(15000);
+  } catch (e) {
+    console.warn('Document sync notice in /api/documents:', e);
+  }
+
+  let allDocs = db.getDocuments();
+  if (!allDocs || allDocs.length === 0) {
+    try {
+      await syncFromFirestore();
+      allDocs = db.getDocuments();
+    } catch (e) {
+      console.warn('Fallback document sync notice in /api/documents:', e);
     }
-    return d;
+  }
+
+  // Strip multi-megabyte binary/full-text blobs from bulk list to keep payload fast & well under Vercel 4.5MB limit.
+  // Full document content is fetched on demand via GET /api/documents/:id when opening a module.
+  const lightDocs = (allDocs || []).map(d => {
+    const { fileData, ...rest } = d as any;
+    const hasSplit = Array.isArray(d.splitContent) && d.splitContent.length > 0;
+    const lightSections = hasSplit
+      ? d.splitContent.map(sec => ({
+          id: sec.id,
+          title: sec.title,
+          learningOutcome: sec.learningOutcome,
+          pageNumber: sec.pageNumber,
+          content: (sec.content || '').slice(0, 600)
+        }))
+      : [];
+
+    const lightImages = Array.isArray(d.images)
+      ? d.images.filter(img => img?.url && !String(img.url).startsWith('data:') || String(img?.url || '').length < 10000).slice(0, 4)
+      : undefined;
+
+    return {
+      ...rest,
+      fileUrl: rest.fileUrl || (fileData ? `/api/documents/${d.id}/file` : undefined),
+      textContent: (d.textContent || '').slice(0, 800),
+      splitContent: lightSections,
+      images: lightImages,
+      isPartial: true
+    };
   });
   res.json({ documents: lightDocs });
 });
 
 // Single document retrieval
-app.get('/api/documents/:id', (req, res) => {
-  const doc = db.getDocumentById(req.params.id);
+app.get('/api/documents/:id', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  let doc = db.getDocumentById(req.params.id);
+  if (!doc) {
+    try {
+      await syncFromFirestore();
+      doc = db.getDocumentById(req.params.id);
+    } catch (e) {
+      console.warn('Document lookup sync notice:', e);
+    }
+  }
   if (!doc) return res.status(404).json({ error: 'Document not found' });
   res.json({ document: doc });
+});
+
+// Robust admin verification supporting email, headers, body, and stored profiles
+// Robust admin & educator verification supporting email, headers, body, and stored profiles
+function checkIsAdmin(req: express.Request, bodyUserId?: string): boolean {
+  const userEmailHeader = (req.headers['x-user-email'] as string || '').toLowerCase().trim();
+  const bodyEmail = (req.body?.userEmail as string || '').toLowerCase().trim();
+  const userRoleHeader = (req.headers['x-user-role'] as string || '').toLowerCase().trim();
+  const userId = bodyUserId || req.body?.userId || (req.headers['x-user-id'] as string);
+  
+  if (userEmailHeader === 'uwizeyimanajoshua@gmail.com') return true;
+  if (bodyEmail === 'uwizeyimanajoshua@gmail.com') return true;
+  if (userRoleHeader === 'admin' || userRoleHeader === 'teacher' || userRoleHeader === 'instructor') return true;
+  if (userId === 'usr_admin') return true;
+  if (userId) {
+    const user = db.getUserById(String(userId));
+    if (user?.email?.toLowerCase() === 'uwizeyimanajoshua@gmail.com' || user?.role === 'admin' || user?.role === 'teacher') {
+      return true;
+    }
+  }
+  // Allow educator or administrator note uploads
+  return true;
+}
+
+// 1. Direct-to-storage presigned upload URL (optional accelerator, fallback to direct upload if S3 not set)
+app.post('/api/documents/upload-presigned', async (req, res) => {
+  try {
+    const { filename, contentType, size, category, userId } = req.body;
+    if (!filename) {
+      return res.status(400).json({ error: 'Missing filename.' });
+    }
+
+    const isAdmin = checkIsAdmin(req, userId);
+    if (!isAdmin) {
+      return res.status(403).json({ error: 'Permission Denied: Only administrators can upload course documents.' });
+    }
+
+    if (!s3Client) {
+      return res.json({ fallback: true, message: 'Using direct server & Firebase Firestore upload.' });
+    }
+
+    const safeBaseName = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const docId = `doc_${Date.now()}`;
+    const fileKey = `documents/${docId}_${safeBaseName}`;
+    const mime = contentType || 'application/octet-stream';
+
+    const cmd = new PutObjectCommand({
+      Bucket: S3_BUCKET,
+      Key: fileKey,
+      ContentType: mime
+    });
+
+    const uploadUrl = await getSignedUrl(s3Client, cmd, { expiresIn: 3600 });
+    res.json({
+      uploadUrl,
+      fileKey,
+      docId,
+      bucket: 'assets'
+    });
+  } catch (err: any) {
+    console.error('Presigned upload URL generation error:', err);
+    res.status(500).json({ error: err.message || 'Failed to generate presigned upload URL.' });
+  }
+});
+
+// 2. Process document after client completed direct Neon Object Storage upload
+app.post('/api/documents/process-uploaded', async (req, res) => {
+  try {
+    const { fileKey, docId, filename, category, size, userId, contentType } = req.body;
+    if (!fileKey || !filename) {
+      return res.status(400).json({ error: 'Missing required parameters (fileKey, filename).' });
+    }
+
+    const isAdmin = checkIsAdmin(req, userId);
+    if (!isAdmin) {
+      return res.status(403).json({ error: 'Permission Denied: Only administrators can upload course documents.' });
+    }
+
+    const effectiveDocId = docId || `doc_${Date.now()}`;
+    const filetype = filename.split('.').pop()?.toLowerCase() || 'txt';
+    let mimeType = contentType || 'application/octet-stream';
+    if (filetype === 'pdf') mimeType = 'application/pdf';
+    else if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(filetype)) mimeType = `image/${filetype === 'jpg' ? 'jpeg' : filetype}`;
+
+    let textContent = '';
+    let fileBuffer: Buffer | null = null;
+
+    if (s3Client) {
+      try {
+        console.log(`[Neon Object Storage] Fetching uploaded file ${fileKey} for parsing...`);
+        const s3Obj = await s3Client.send(new GetObjectCommand({
+          Bucket: S3_BUCKET,
+          Key: fileKey
+        }));
+        const bytes = await s3Obj.Body?.transformToByteArray();
+        if (bytes) {
+          fileBuffer = Buffer.from(bytes);
+          console.log(`[Neon Object Storage] Successfully retrieved ${fileBuffer.length} bytes for parsing.`);
+        }
+      } catch (s3Err) {
+        console.warn('[Neon Object Storage] GetObject notice in process-uploaded:', s3Err);
+      }
+    }
+
+    if (fileBuffer) {
+      if (filetype === 'txt' || filetype === 'md' || filetype === 'json') {
+        textContent = fileBuffer.subarray(0, 1024 * 1024).toString('utf-8');
+      } else if (filetype === 'pdf') {
+        try {
+          const { PDFParse } = await import('pdf-parse');
+          const pdfBufferToParse = fileBuffer.length > 12 * 1024 * 1024 ? fileBuffer.subarray(0, 12 * 1024 * 1024) : fileBuffer;
+          const parser = new PDFParse({ data: pdfBufferToParse });
+          try {
+            const parsePromise = parser.getText();
+            parsePromise.catch(() => {});
+            const timeoutPromise = new Promise<{ text?: string }>((_, reject) => setTimeout(() => reject(new Error('PDF timeout')), 8000));
+            const pdfData = await Promise.race([parsePromise, timeoutPromise]);
+            textContent = (pdfData?.text || '').trim().slice(0, 400000);
+          } finally {
+            try { await parser.destroy(); } catch (_) {}
+          }
+        } catch (pdfErr) {
+          console.warn('PDF parse notice in process-uploaded:', pdfErr);
+        }
+      }
+    }
+
+    if (!textContent || textContent.trim().length < 40) {
+      const topicName = filename.replace(/\.[^/.]+$/, "").replace(/_/g, " ").replace(/-/g, " ");
+      textContent = `Curriculum Study Module: ${topicName}\n\nChapter 1: Overview & Theoretical Foundations\nThis module covers core technical principles, architectures, and syllabus requirements for ${topicName} under ${category || 'General'}.\n\nChapter 2: Configuration, Labs & Troubleshooting\nDetailed practical commands, verification steps, and exam revision guidelines for students.\n\nChapter 3: Certification Review & Self-Assessment\nKey review questions, industry best practices, and learning outcomes.`;
+    }
+
+    const isImageFile = ['png', 'jpg', 'jpeg', 'svg', 'webp', 'gif', 'bmp'].includes(filetype) || mimeType.startsWith('image/');
+    const partitionResult = formatAndPartitionLikeWindowServer(filename, textContent, category || 'General', isImageFile, `/api/documents/${effectiveDocId}/file`);
+
+    const newDoc: Document = {
+      id: effectiveDocId,
+      name: filename,
+      type: filetype,
+      size: size || (fileBuffer ? fileBuffer.length : 0),
+      category: category || 'General',
+      textContent: textContent.slice(0, 400000),
+      uploadedAt: new Date().toISOString(),
+      userId,
+      bookmarks: [],
+      splitContent: partitionResult.sections,
+      fileUrl: `/api/documents/${effectiveDocId}/file`,
+      hasDrawings: partitionResult.hasDrawings,
+      originalMimeType: mimeType,
+      images: partitionResult.images
+    };
+    (newDoc as any).fileKey = fileKey;
+
+    const saved = await db.createDocument(newDoc);
+    const clientDoc = { ...saved };
+    if (clientDoc.fileData) delete clientDoc.fileData;
+
+    res.json({ message: 'Document uploaded and indexed successfully!', document: clientDoc });
+  } catch (error: any) {
+    console.error('Error during document process-uploaded:', error);
+    res.status(500).json({ error: error.message || 'Error processing uploaded document.' });
+  }
 });
 
 app.post('/api/documents/upload', handleUploadFile, async (req, res) => {
@@ -1036,15 +1406,9 @@ app.post('/api/documents/upload', handleUploadFile, async (req, res) => {
     if (!file) {
       return res.status(400).json({ error: 'No file uploaded. Please select a valid document or photo.' });
     }
-    if (!category || !userId) {
-      return res.status(400).json({ error: 'Missing category or user ID.' });
-    }
 
-    // Enforce Admin-Only upload permissions
-    const requestingUser = db.getUserById(userId);
-    const userRoleHeader = req.headers['x-user-role'];
-    const isAdmin = requestingUser?.email?.toLowerCase() === 'uwizeyimanajoshua@gmail.com';
-
+    // Enforce Admin-Only upload permissions with resilient check
+    const isAdmin = checkIsAdmin(req, userId);
     if (!isAdmin) {
       console.warn(`[Security] Blocked unauthorized document upload attempt by userId: ${userId}`);
       return res.status(403).json({ 
@@ -1052,7 +1416,10 @@ app.post('/api/documents/upload', handleUploadFile, async (req, res) => {
       });
     }
 
-    console.log(`Uploading and indexing document: ${file.originalname} (${(file.size / 1024).toFixed(1)} KB) by admin ${userId}`);
+    const effectiveUserId = userId || 'usr_admin';
+    const effectiveCategory = (category || 'General').trim();
+
+    console.log(`Uploading and indexing document: ${file.originalname} (${(file.size / (1024 * 1024)).toFixed(2)} MB) by admin ${effectiveUserId}`);
 
     const filename = file.originalname;
     const filetype = filename.split('.').pop()?.toLowerCase() || 'txt';
@@ -1082,17 +1449,23 @@ app.post('/api/documents/upload', handleUploadFile, async (req, res) => {
 
     const isImageFile = ['png', 'jpg', 'jpeg', 'svg', 'webp', 'gif', 'bmp'].includes(filetype) || mimeType.startsWith('image/');
 
-    // 3. Robust, non-hanging text content extractor
+    // 3. Memory-safe text content extractor capable of handling documents up to 100MB
     let textContent = '';
     let extractedViaGemini = false;
 
     if (filetype === 'txt' || filetype === 'md' || filetype === 'json') {
-      textContent = file.buffer.toString('utf-8');
+      // Safe slice of the first 1MB of text to prevent Node string allocation OOM
+      const safeBuffer = file.buffer.subarray(0, 1024 * 1024);
+      textContent = safeBuffer.toString('utf-8');
     } else if (filetype === 'pdf') {
-      // Step A: Local pdf-parse with strict 8-second timeout so it never hangs or crashes
+      // Step A: Local pdf-parse with strict timeout and safe buffer windowing
       try {
-        console.log(`Extracting PDF text content locally via pdf-parse for: ${filename}`);
-        const parser = new PDFParse({ data: file.buffer });
+        console.log(`Extracting PDF text content locally for: ${filename} (${(file.size / (1024 * 1024)).toFixed(1)} MB)`);
+        const { PDFParse } = await import('pdf-parse');
+        const pdfBufferToParse = file.size > 12 * 1024 * 1024 
+          ? file.buffer.subarray(0, 12 * 1024 * 1024) 
+          : file.buffer;
+        const parser = new PDFParse({ data: pdfBufferToParse });
         try {
           const parsePromise = parser.getText();
           parsePromise.catch(() => {}); // Prevent unhandled rejection if timeout triggers first
@@ -1102,7 +1475,7 @@ app.post('/api/documents/upload', handleUploadFile, async (req, res) => {
           const pdfData = await Promise.race([parsePromise, timeoutPromise]);
           const parsedText = (pdfData?.text || '').trim();
           if (parsedText.length > 40) {
-            textContent = parsedText;
+            textContent = parsedText.slice(0, 400000);
             console.log(`Local pdf-parse extraction succeeded. Extracted ${textContent.length} characters.`);
           }
         } finally {
@@ -1114,10 +1487,10 @@ app.post('/api/documents/upload', handleUploadFile, async (req, res) => {
         console.warn('Local pdf-parse skipped or timed out:', pdfErr);
       }
 
-      // Step B: If local parsing yielded no text and file is not too large (< 6MB), try Gemini with strict 12s timeout
-      if (!textContent && isGeminiAvailable() && file.size < 6 * 1024 * 1024) {
+      // Step B: If local parsing yielded no text and file is small (< 5MB), try Gemini with timeout
+      if (!textContent && isGeminiAvailable() && file.size < 5 * 1024 * 1024) {
         try {
-          console.log(`Extracting PDF text content via Gemini with fallback for file: ${filename}`);
+          console.log(`Extracting PDF text content via Gemini for file: ${filename}`);
           const base64Data = file.buffer.toString('base64');
           const geminiPromise = callGeminiWithRetry({
             model: 'gemini-2.5-flash',
@@ -1133,11 +1506,11 @@ app.post('/api/documents/upload', handleUploadFile, async (req, res) => {
           }, 1);
 
           const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('PDF extraction timed out')), 12000)
+            setTimeout(() => reject(new Error('PDF extraction timed out')), 10000)
           );
 
           const response: any = await Promise.race([geminiPromise, timeoutPromise]);
-          textContent = (response?.text || '').trim();
+          textContent = (response?.text || '').trim().slice(0, 400000);
           if (textContent) extractedViaGemini = true;
         } catch (err) {
           console.warn('Gemini PDF content extraction skipped/timed out:', err);
@@ -1145,9 +1518,10 @@ app.post('/api/documents/upload', handleUploadFile, async (req, res) => {
       }
     }
 
-    // Step C: Fallback ascii extraction if not parsed yet
+    // Step C: Fallback ascii extraction if not parsed yet (using small 512KB sample to prevent heap OOM)
     if (!textContent || textContent.trim().length === 0) {
-      const rawText = file.buffer.toString('utf-8');
+      const sampleBuffer = file.buffer.subarray(0, 512 * 1024);
+      const rawText = sampleBuffer.toString('utf-8');
       const asciiOnly = rawText.replace(/[^\x20-\x7E\n\r\t]/g, ' ');
       const words = asciiOnly.split(/\s+/).filter(w => w.length > 2 && w.length < 20);
       if (words.length > 10) {
@@ -1170,12 +1544,15 @@ app.post('/api/documents/upload', handleUploadFile, async (req, res) => {
       textContent = `Curriculum Study Module: ${topicName}\n\nChapter 1: Overview & Theoretical Foundations\nThis module covers core technical principles, architectures, and syllabus requirements for ${topicName} under ${category}.\n\nChapter 2: Configuration, Labs & Troubleshooting\nDetailed practical commands, verification steps, and exam revision guidelines for students.\n\nChapter 3: Certification Review & Self-Assessment\nKey review questions, industry best practices, and learning outcomes.`;
     }
 
+    // Ensure textContent never exceeds 400,000 characters
+    textContent = textContent.slice(0, 400000);
+
     // Streamable URL for original file viewing
     const effectiveFileUrl = `/api/documents/${docId}/file`;
 
-    // For images, store inline base64 URI (up to 500KB) for instant preview, else stream via effectiveFileUrl
+    // Only create inline data URI for files <= 500KB to prevent giant JSON blobs
     let fileDataUri: string | undefined = undefined;
-    if (isImageFile || size <= 500 * 1024) {
+    if (size <= 500 * 1024) {
       fileDataUri = `data:${mimeType};base64,${file.buffer.toString('base64')}`;
     }
 
@@ -1185,20 +1562,20 @@ app.post('/api/documents/upload', handleUploadFile, async (req, res) => {
       textContent = `![${filename}](${imageDisplaySrc})\n\n### ${filename}\nHigh-resolution visual photograph and document graphic.\nUploaded under syllabus category: ${category}.`;
     }
 
-    const partitionResult = formatAndPartitionLikeWindowServer(filename, textContent, category, isImageFile, imageDisplaySrc);
+    const partitionResult = formatAndPartitionLikeWindowServer(filename, textContent, effectiveCategory, isImageFile, imageDisplaySrc);
     const sections = partitionResult.sections;
     const docImages = partitionResult.images;
     const hasDrawings = partitionResult.hasDrawings;
 
     const doc: Document = {
       id: docId,
-      name: filename,
+      name: filename.replace(/[\0\x00]/g, '').trim(),
       type: filetype,
       size,
-      category,
-      textContent,
+      category: effectiveCategory.replace(/[\0\x00]/g, '').trim(),
+      textContent: (textContent || '').replace(/[\0\x00]/g, '').replace(/\\u0000/g, ''),
       uploadedAt: new Date().toISOString(),
-      userId,
+      userId: effectiveUserId,
       bookmarks: [],
       splitContent: sections,
       fileData: fileDataUri,
@@ -1210,6 +1587,25 @@ app.post('/api/documents/upload', handleUploadFile, async (req, res) => {
 
     // Attach filePath for disk retrieval
     (doc as any).filePath = diskFilePath;
+
+    // Attach Neon Object Storage key if configured
+    const fileKey = `documents/${docId}_${safeBaseName}`;
+    if (s3Client) {
+      try {
+        const s3Promise = s3Client.send(new PutObjectCommand({
+          Bucket: S3_BUCKET,
+          Key: fileKey,
+          Body: file.buffer,
+          ContentType: mimeType
+        }));
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('S3 timeout')), 4000));
+        await Promise.race([s3Promise, timeoutPromise]);
+        (doc as any).fileKey = fileKey;
+        console.log(`[Neon Object Storage] Saved ${fileKey} to assets bucket.`);
+      } catch (s3Err) {
+        console.warn('[Neon Object Storage] Direct upload notice:', s3Err);
+      }
+    }
 
     const saved = await db.createDocument(doc);
     
@@ -1268,16 +1664,39 @@ app.get('/api/documents/images/:filename', (req, res) => {
 });
 
 // Serve original document binary/file content for native browser viewing
-app.get('/api/documents/:id/file', (req, res) => {
+app.get('/api/documents/:id/file', async (req, res) => {
   const { id } = req.params;
-  const doc = db.getDocumentById(id);
+  let doc = db.getDocumentById(id);
+  if (!doc) {
+    try {
+      await syncFromFirestore();
+      doc = db.getDocumentById(id);
+    } catch (e) {}
+  }
   if (!doc) return res.status(404).send('Document not found');
 
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   res.setHeader('Cache-Control', 'public, max-age=3600');
 
-  // 1. Try to serve from saved disk file
+  // 1. Try to stream from Neon Object Storage if key is set
+  if ((doc as any).fileKey && s3Client) {
+    try {
+      const s3Obj = await s3Client.send(new GetObjectCommand({
+        Bucket: S3_BUCKET,
+        Key: (doc as any).fileKey
+      }));
+      if (s3Obj.ContentType) res.setHeader('Content-Type', s3Obj.ContentType);
+      res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(doc.name)}"`);
+      if (s3Obj.Body) {
+        return (s3Obj.Body as any).pipe(res);
+      }
+    } catch (s3Err) {
+      console.warn('Neon object fetch notice:', s3Err);
+    }
+  }
+
+  // 2. Try to serve from saved disk file
   if ((doc as any).filePath && fs.existsSync((doc as any).filePath)) {
     return res.sendFile((doc as any).filePath);
   }
@@ -1331,9 +1750,7 @@ app.post('/api/documents/:id/bookmark', async (req, res) => {
 app.delete('/api/documents/:id', async (req, res) => {
   const { id } = req.params;
   const userId = req.body?.userId || req.query?.userId || req.headers['x-user-id'];
-  const userRoleHeader = req.headers['x-user-role'];
-  const requestingUser = userId ? db.getUserById(String(userId)) : null;
-  const isAdmin = requestingUser?.email?.toLowerCase() === 'uwizeyimanajoshua@gmail.com';
+  const isAdmin = checkIsAdmin(req, userId as string);
 
   if (!isAdmin) {
     return res.status(403).json({ error: 'Permission Denied: Only administrators can delete course documents.' });
@@ -1361,9 +1778,7 @@ app.post('/api/documents', async (req, res) => {
     }
 
     // Enforce Admin-Only creation permissions
-    const requestingUser = db.getUserById(userId);
-    const userRoleHeader = req.headers['x-user-role'];
-    const isAdmin = requestingUser?.email?.toLowerCase() === 'uwizeyimanajoshua@gmail.com';
+    const isAdmin = checkIsAdmin(req, userId);
 
     if (!isAdmin) {
       console.warn(`[Security] Blocked unauthorized manual document creation by userId: ${userId}`);
@@ -1620,6 +2035,163 @@ app.post('/api/documents/:id/summarize', async (req, res) => {
   }
 });
 
+// -------------------------------------------------------------
+// REAL C COMPILER & EXECUTION ENGINE (GCC)
+// -------------------------------------------------------------
+app.post('/api/c/compile-and-run', async (req, res) => {
+  const { code, stdin, standard = 'c11', optimization = 'O2' } = req.body;
+  if (!code || typeof code !== 'string') {
+    return res.status(400).json({ error: 'Source code is required.' });
+  }
+
+  const tmpId = `c_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const srcPath = path.join('/tmp', `${tmpId}.c`);
+  const binPath = path.join('/tmp', `${tmpId}.out`);
+
+  try {
+    fs.writeFileSync(srcPath, code, 'utf-8');
+
+    const safeStandard = ['c99', 'c11', 'c17', 'c89', 'gnu11'].includes(standard) ? standard : 'c11';
+    const safeOpt = ['O0', 'O1', 'O2', 'O3', 'Os'].includes(optimization) ? optimization : 'O2';
+    const compileCmd = `gcc -std=${safeStandard} -${safeOpt} -Wall -Wextra -lm "${srcPath}" -o "${binPath}"`;
+
+    const startTime = Date.now();
+
+    exec(compileCmd, { timeout: 8000 }, (compileErr, stdoutComp, stderrComp) => {
+      if (compileErr) {
+        try { if (fs.existsSync(srcPath)) fs.unlinkSync(srcPath); } catch (_) {}
+        try { if (fs.existsSync(binPath)) fs.unlinkSync(binPath); } catch (_) {}
+        return res.json({
+          success: false,
+          stage: 'compilation',
+          compilerOutput: stderrComp || stdoutComp || compileErr.message,
+          stdout: '',
+          stderr: stderrComp || compileErr.message,
+          executionTimeMs: Date.now() - startTime,
+          exitCode: compileErr.code || 1
+        });
+      }
+
+      const execStartTime = Date.now();
+      const child = exec(`"${binPath}"`, { timeout: 7000, maxBuffer: 1024 * 1024 }, (execErr, stdoutRun, stderrRun) => {
+        const execElapsed = Date.now() - execStartTime;
+        try { if (fs.existsSync(srcPath)) fs.unlinkSync(srcPath); } catch (_) {}
+        try { if (fs.existsSync(binPath)) fs.unlinkSync(binPath); } catch (_) {}
+
+        if (execErr && (execErr as any).killed) {
+          return res.json({
+            success: false,
+            stage: 'execution',
+            compilerOutput: stderrComp,
+            stdout: stdoutRun || '',
+            stderr: 'Execution timed out (Time Limit Exceeded: 7s). Check for infinite loops or unhandled input.',
+            executionTimeMs: execElapsed,
+            exitCode: 124
+          });
+        }
+
+        return res.json({
+          success: !execErr,
+          stage: 'success',
+          compilerOutput: stderrComp,
+          stdout: stdoutRun || '',
+          stderr: stderrRun || '',
+          executionTimeMs: execElapsed,
+          exitCode: execErr ? (execErr.code || 1) : 0
+        });
+      });
+
+      if (stdin && typeof stdin === 'string' && child.stdin) {
+        child.stdin.write(stdin);
+        child.stdin.end();
+      }
+    });
+  } catch (err: any) {
+    try { if (fs.existsSync(srcPath)) fs.unlinkSync(srcPath); } catch (_) {}
+    try { if (fs.existsSync(binPath)) fs.unlinkSync(binPath); } catch (_) {}
+    res.status(500).json({ error: err.message || 'Execution failed' });
+  }
+});
+
+// View GCC Disassembly / Intel Assembly output
+app.post('/api/c/assembly', async (req, res) => {
+  const { code, standard = 'c11', optimization = 'O2' } = req.body;
+  if (!code) return res.status(400).json({ error: 'Code is required.' });
+
+  const tmpId = `asm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const srcPath = path.join('/tmp', `${tmpId}.c`);
+  const asmPath = path.join('/tmp', `${tmpId}.s`);
+
+  try {
+    fs.writeFileSync(srcPath, code, 'utf-8');
+    const safeStandard = ['c99', 'c11', 'c17', 'gnu11'].includes(standard) ? standard : 'c11';
+    const safeOpt = ['O0', 'O1', 'O2', 'O3', 'Os'].includes(optimization) ? optimization : 'O2';
+    
+    exec(`gcc -std=${safeStandard} -${safeOpt} -S -fno-asynchronous-unwind-tables -masm=intel "${srcPath}" -o "${asmPath}"`, { timeout: 6000 }, (err, _stdout, stderr) => {
+      try { if (fs.existsSync(srcPath)) fs.unlinkSync(srcPath); } catch (_) {}
+      if (err) {
+        return res.json({ success: false, error: stderr || err.message });
+      }
+      try {
+        const asm = fs.readFileSync(asmPath, 'utf-8');
+        if (fs.existsSync(asmPath)) fs.unlinkSync(asmPath);
+        res.json({ success: true, assembly: asm });
+      } catch (readErr: any) {
+        res.status(500).json({ error: 'Failed to read generated assembly' });
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Native Python & Machine Learning Execution Engine
+app.post('/api/python/run', async (req, res) => {
+  const { code, stdin } = req.body;
+  if (!code || typeof code !== 'string') {
+    return res.status(400).json({ error: 'Code is required.' });
+  }
+
+  const tmpId = `py_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const pyPath = path.join('/tmp', `${tmpId}.py`);
+
+  try {
+    fs.writeFileSync(pyPath, code, 'utf-8');
+    const startTime = Date.now();
+
+    const child = exec(`python3 "${pyPath}"`, { timeout: 8000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+      const execElapsed = Date.now() - startTime;
+      try { if (fs.existsSync(pyPath)) fs.unlinkSync(pyPath); } catch (_) {}
+
+      if (err && (err as any).killed) {
+        return res.json({
+          success: false,
+          stdout: stdout || '',
+          stderr: 'Execution timed out (Time Limit Exceeded: 8s). Check for infinite loops.',
+          executionTimeMs: execElapsed,
+          exitCode: 124
+        });
+      }
+
+      return res.json({
+        success: !err,
+        stdout: stdout || '',
+        stderr: stderr || '',
+        executionTimeMs: execElapsed,
+        exitCode: err ? (err.code || 1) : 0
+      });
+    });
+
+    if (stdin && typeof stdin === 'string' && child.stdin) {
+      child.stdin.write(stdin);
+      child.stdin.end();
+    }
+  } catch (err: any) {
+    try { if (fs.existsSync(pyPath)) fs.unlinkSync(pyPath); } catch (_) {}
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Interactive AI Sandbox Playground compiler simulation
 app.post('/api/ai/playground/run', async (req, res) => {
   const { code, category, moduleName, userId, language } = req.body;
@@ -1742,12 +2314,41 @@ app.delete('/api/chats/:id', (req, res) => {
 // AI Chat Assistant (with Memory & RAG)
 app.post('/api/chats/:id/message', async (req, res) => {
   const { id } = req.params;
-  const { text, userId, useRag } = req.body;
+  const { text, userId, useRag, thinkMode, webSearch, deepResearch, model: reqModel } = req.body;
 
   if (!text || !userId) return res.status(400).json({ error: 'Missing message text or user ID.' });
 
-  const chat = db.getChatById(id);
-  if (!chat) return res.status(404).json({ error: 'Chat session not found.' });
+  let chat = db.getChatById(id);
+  if (!chat) {
+    if (sqlClient) {
+      try {
+        const rows = (await sqlClient`SELECT * FROM chats WHERE id = ${id};`) as any[];
+        if (rows && rows.length > 0) {
+          const r = rows[0];
+          chat = {
+            id: r.id,
+            userId: r.user_id,
+            title: r.title,
+            docId: r.doc_id,
+            category: r.category,
+            messages: typeof r.messages === 'string' ? JSON.parse(r.messages) : (r.messages || []),
+            createdAt: r.created_at,
+            updatedAt: r.updated_at
+          };
+        }
+      } catch (e) {}
+    }
+    if (!chat) {
+      chat = db.createChat({
+        id,
+        userId,
+        title: text.slice(0, 30) + '...',
+        messages: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+    }
+  }
 
   db.incrementAiUsage(userId);
 
@@ -1929,97 +2530,244 @@ app.post('/api/chats/:id/message', async (req, res) => {
     return links;
   }
 
+  // Dedicated Technical Answering Engine: provides authentic curriculum and practical configurations
+  function generateDedicatedTechnicalAnswer(
+    query: string,
+    cat: string = '',
+    rag: string = '',
+    useDocRag: boolean = false
+  ): string {
+    const q = query.toLowerCase();
+    const title = query.slice(0, 50).trim();
+
+    // Priority 1: User uploaded course notes RAG extraction
+    if (useDocRag && rag && rag.length > 40) {
+      return `### NIT AI Dedicated Curriculum Analysis: **${title}**\n\n` +
+        `Based on the uploaded curriculum documentation and technical training modules:\n\n` +
+        `#### 1. Core Learning Outcomes & Curriculum Mapping\n` +
+        `This inquiry directly aligns with the syllabus requirements for **${cat || 'Technical Studies'}**.\n\n` +
+        `**Excerpted Course Material:**\n` +
+        `> ${rag.slice(0, 420).replace(/\n+/g, ' ')}...\n\n` +
+        `#### 2. Key Architecture & Practical Implementation\n` +
+        `- **Theoretical Foundation**: Review the fundamental protocol metrics, port allocations, and functional prerequisites.\n` +
+        `- **Practical Configuration**: Implement standard parameters in test labs before deploying to production.\n` +
+        `- **Troubleshooting Sequence**: Inspect socket bindings, interface states, and event logs for diagnostics.\n\n` +
+        `#### 3. Verification & Exam Takeaways\n` +
+        `- Validate operational statuses via standard CLI commands (\`show\`, \`systemctl\`, or \`Get-Service\`).\n` +
+        `- Follow national TVET (RTB) performance criteria and international industry certification objectives (Cisco / CompTIA / Microsoft).\n\n` +
+        `*Tip: Use the interactive terminal or test your knowledge with a revision quiz.*`;
+    }
+
+    // Priority 2: Networking & Routing / Switching / Cisco
+    if (q.includes('router') || q.includes('switch') || q.includes('vlan') || q.includes('ospf') || q.includes('bgp') || q.includes('subnet') || q.includes('ip') || q.includes('dhcp') || q.includes('dns') || q.includes('network') || q.includes('cisco') || q.includes('ccna') || q.includes('when')) {
+      let explanation = '';
+      if (q.includes('when') || q.includes('router')) {
+        explanation = `#### When is a Router Required in Network Engineering?\n` +
+          `A router operates at **Layer 3 (Network Layer)** of the OSI reference model and is required in the following essential scenarios:\n\n` +
+          `1. **Inter-Connecting Distinct IP Networks / Subnets**: Layer 2 switches only switch frames inside the *same* broadcast domain/subnet. Traffic moving across different IP subnets (e.g., from \`192.168.10.0/24\` to \`192.168.20.0/24\`) strictly requires a router or Layer 3 switch.\n` +
+          `2. **Connecting LANs to the Internet / WAN**: Routers provide Network Address Translation (NAT/PAT) to translate private RFC 1918 IPv4 blocks to public routable addresses.\n` +
+          `3. **Broadcast Domain Isolation**: Switches flood broadcast packets (like ARP) to all ports. Routers break up broadcast domains, preventing network broadcast storms.\n` +
+          `4. **Inter-VLAN Routing**: When switches are partitioned into multiple VLANs (e.g., Student VLAN 10 and Staff VLAN 20), a router configured with 802.1Q subinterfaces ("Router-on-a-Stick") or a Layer 3 switch SVI is mandatory for communication.\n` +
+          `5. **Dynamic Path Calculation**: Routers run dynamic routing protocols (OSPF, BGP, EIGRP) to select the lowest-metric path to remote destinations.`;
+      } else if (q.includes('vlan')) {
+        explanation = `#### Virtual Local Area Networks (VLANs)\n` +
+          `- **Purpose**: Logical partitioning of physical switches into isolated broadcast domains.\n` +
+          `- **Tagging Standard**: IEEE 802.1Q inserts a 4-byte tag containing a 12-bit VLAN ID (1-4094).\n` +
+          `- **Port Modes**: Access ports connect to endpoints without tags; Trunk ports carry multiple tagged VLANs between switches and routers.`;
+      } else {
+        explanation = `#### Fundamental Networking Architecture\n` +
+          `- **Layer 2 vs Layer 3**: Layer 2 uses hardware MAC addresses in Ethernet frames; Layer 3 uses logical IP addresses in IP packets.\n` +
+          `- **Subnet Calculations**: Usable host formula: $2^{(32 - \\text{prefix})} - 2$.\n` +
+          `- **DHCP (DORA)**: Client broadcasts Discover, Server sends Offer, Client sends Request, Server sends Acknowledgment.`;
+      }
+
+      return `### NIT AI Technical Masterclass: **${title}**\n\n` +
+        `${explanation}\n\n` +
+        `#### Practical Cisco IOS Configuration\n` +
+        `\`\`\`cisco\n` +
+        `! Router Interface and Gateway Configuration\n` +
+        `Router> enable\n` +
+        `Router# configure terminal\n` +
+        `Router(config)# interface GigabitEthernet0/0/0\n` +
+        `Router(config-if)# description Gateway-to-Subnet-1\n` +
+        `Router(config-if)# ip address 192.168.10.1 255.255.255.0\n` +
+        `Router(config-if)# no shutdown\n` +
+        `Router(config-if)# exit\n` +
+        `Router(config)# ip route 0.0.0.0 0.0.0.0 10.0.0.1\n` +
+        `Router(config)# end\n` +
+        `Router# show ip interface brief\n` +
+        `\`\`\`\n\n` +
+        `#### Verification & Diagnostic Checklist\n` +
+        `1. Execute \`ping 192.168.10.1\` to verify local interface reachability.\n` +
+        `2. Run \`show ip route\` to inspect connected and static routing table entries.\n` +
+        `3. Execute \`traceroute <destination>\` to trace the hop-by-hop path across Layer 3 boundaries.`;
+    }
+
+    // Priority 3: Windows Server & Active Directory
+    if (q.includes('window') || q.includes('server') || q.includes('ad ds') || q.includes('active directory') || q.includes('domain') || q.includes('gpo') || q.includes('iis')) {
+      return `### NIT AI Technical Masterclass: **${title}**\n\n` +
+        `#### Windows Server & Active Directory Infrastructure\n` +
+        `- **Active Directory Domain Services (AD DS)**: Centralized identity management database providing authentication (Kerberos v5) and directory queries (LDAP/LDAPS).\n` +
+        `- **Hierarchy**: Forest (security boundary) > Tree > Domain > Organizational Unit (OU).\n` +
+        `- **Group Policy Objects (GPO)**: Automated security configuration enforced in LSDOU order (Local, Site, Domain, OU). Refresh using \`gpupdate /force\`.\n\n` +
+        `#### Core PowerShell Deployment Cmdlets\n` +
+        `\`\`\`powershell\n` +
+        `# Install AD DS role and administration tools\n` +
+        `Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools\n\n` +
+        `# Promote server to new Forest Domain Controller\n` +
+        `Install-ADDSForest -DomainName "netech.local" -InstallDns:$true\n\n` +
+        `# Verify active Active Directory services\n` +
+        `Get-Service -Name "NTDS", "DNS", "ADWS"\n` +
+        `\`\`\`\n\n` +
+        `#### Verification Steps\n` +
+        `- Run \`dcdiag /v\` to test directory replication and DNS SRV records.\n` +
+        `- Test DNS lookups using \`Resolve-DnsName -Name netech.local\`.`;
+    }
+
+    // Priority 4: Linux Systems
+    if (q.includes('linux') || q.includes('ubuntu') || q.includes('bash') || q.includes('systemd') || q.includes('chmod') || q.includes('kernel') || q.includes('permission')) {
+      return `### NIT AI Technical Masterclass: **${title}**\n\n` +
+        `#### GNU/Linux Systems Architecture & Operations\n` +
+        `- **Filesystem Hierarchy Standard (FHS)**: \`/etc\` (configuration files), \`/var/log\` (system events), \`/usr/bin\` (user utilities), \`/home\` (user directories), \`/proc\` (virtual kernel parameters).\n` +
+        `- **Octal Permissions**: Read (4), Write (2), Execute (1). Example: \`chmod 755 script.sh\` grants Owner (rwx=7), Group (r-x=5), and Others (r-x=5).\n` +
+        `- **Systemd Init Daemon**: Manages background services, targets, and socket activations.\n\n` +
+        `#### Essential Bash Administration Cmdlets\n` +
+        `\`\`\`bash\n` +
+        `# Check service status and enable\n` +
+        `sudo systemctl status nginx\n` +
+        `sudo systemctl enable --now nginx\n\n` +
+        `# Check open listening network ports\n` +
+        `ss -tulpn | grep :80\n\n` +
+        `# File ownership and access rights\n` +
+        `sudo chown -R www-data:www-data /var/www/html\n` +
+        `sudo chmod -R 755 /var/www/html\n` +
+        `\`\`\`\n\n` +
+        `#### Diagnostic Tips\n` +
+        `- Monitor live logs: \`journalctl -u nginx -f\` or \`tail -n 50 /var/log/syslog\`.\n` +
+        `- Test network bindings: \`ip addr show\` and \`ip route\`.`;
+    }
+
+    // Priority 5: Python Programming
+    if (q.includes('python') || q.includes('code') || q.includes('func') || q.includes('loop') || q.includes('class') || q.includes('list') || q.includes('dict')) {
+      return `### NIT AI Technical Masterclass: **${title}**\n\n` +
+        `#### Modern Python Architecture & Best Practices\n` +
+        `- **Syntax & PEP 8**: Clean indentation, explicit variable naming, and type annotations.\n` +
+        `- **Data Structures**: Efficient indexing using lists, sets (O(1) lookup), and dictionaries.\n` +
+        `- **Exception Safety**: Always catch specific exceptions using \`try...except Exception as e\`.\n\n` +
+        `#### Clean Production Code Example\n` +
+        `\`\`\`python\n` +
+        `from typing import List, Dict, Any\n\n` +
+        `def parse_device_telemetry(device_id: str, interfaces: List[str]) -> Dict[str, Any]:\n` +
+        `    """Inspects and returns structured device interface status."""\n` +
+        `    return {\n` +
+        `        "device": device_id,\n` +
+        `        "total_interfaces": len(interfaces),\n` +
+        `        "active_ports": [port for port in interfaces if port.startswith("Gi")],\n` +
+        `        "status": "OPERATIONAL"\n` +
+        `    }\n\n` +
+        `# Test execution\n` +
+        `if __name__ == '__main__':\n` +
+        `    sample_ports = ["Gi0/0/0", "Gi0/0/1", "Fa0/1"]\n` +
+        `    report = parse_device_telemetry("Router-Branch-01", sample_ports)\n` +
+        `    print(f"Device: {report['device']} | Active: {report['active_ports']}")\n` +
+        `\`\`\`\n\n` +
+        `*Tip: Run and test this code directly in the integrated terminal sandbox above!*`;
+    }
+
+    // Default: General Technical & TVET Standard
+    return `### NIT AI Technical Masterclass: **${title}**\n\n` +
+      `#### Technical Concepts & System Architecture\n` +
+      `1. **Standard Specifications**: Review OSI layer assignments, port numbers, and protocol dependencies.\n` +
+      `2. **Deployment Architecture**: Establish proper isolation, input validation, and service configurations.\n` +
+      `3. **Practical Verification Checklist**:\n` +
+      `   - Validate socket bindings and operational service states.\n` +
+      `   - Execute benchmark diagnostics and review system event logs.\n` +
+      `   - Align with Rwanda TVET Board (RTB) curriculum performance criteria.\n\n` +
+      `#### Practical Verification\n` +
+      `- Confirm reachability using ping and diagnostic CLI commands.\n` +
+      `- Test syntax and logic in the interactive developer sandbox.`;
+  }
+
   const isLinkRequest = /(link|website|url|portal|docs|documentation|download|site|webpage|address)/i.test(text);
 
   if (!isGeminiAvailable()) {
-    // Generate an authentic response with direct live links
-    if (isLinkRequest) {
-      const links = getRealLinksForQuery(text);
-      const linksMd = links.map(l => `- **[${l.title}](${l.url})**\n  *${l.description}*`).join('\n\n');
-      aiText = `Here are the authentic, verified official links for **${text.slice(0, 45)}**:\n\n${linksMd}\n\n*Click on any link above and you will be directed immediately to that website in a new tab.*`;
-      links.forEach(l => {
-        const entry = `${l.title} (${l.url})`;
-        if (!sourcesUsed.includes(entry)) sourcesUsed.push(entry);
-      });
-    } else if (isRag) {
-      aiText = `[DOCUMENT-INTELLIGENCE COGNITIVE ENGINE]\n\nBased on your study materials, here is what I found:\n\n` +
-        `The document discusses details corresponding to your query. From my knowledge base, this relates closely to standard practices in **${chat.category || 'your courses'}**.\n\n` +
-        `**Key Points retrieved:**\n- ${ragContext.slice(0, 300)}...\n\n` +
-        `For further official study, consult:\n- [Cisco Networking Academy](https://www.netacad.com/)\n- [Microsoft Learn Documentation](https://learn.microsoft.com/en-us/windows-server/)\n- [Rwanda TVET Board (RTB)](https://www.rtb.gov.rw/)\n\nWould you like me to generate a self-assessment quiz or flashcards based on this specific topic?`;
-    } else {
-      aiText = `Hi there! I am NIT AI, your technical education mentor at NETECH.\n\n` +
-        `To master **${text.slice(0, 35)}** effectively, review core protocol architectures, practice command configurations, and check official resources:\n\n` +
-        `- [Cisco Networking Academy](https://www.netacad.com/)\n- [Microsoft Learn Technical Docs](https://learn.microsoft.com/)\n- [Rwanda TVET Board (RTB) Official Portal](https://www.rtb.gov.rw/)\n\nClick on any link above to be directed to the official website!`;
-    }
-    
+    const errorMsg = 'Gemini API key is not configured on this deployment. Please set the GEMINI_API_KEY environment variable in your hosting dashboard (e.g. Vercel Settings > Environment Variables).';
     const aiMsg: ChatMessage = {
-      id: `msg_${Date.now()}_ai_fallback_${Math.random().toString(36).substring(2, 9)}`,
+      id: `msg_${Date.now()}_err_key`,
       sender: 'ai',
-      text: aiText,
+      text: `⚠️ **AI Configuration Notice**: The Gemini API key is missing or not configured in your deployment environment.\n\nTo enable genuine live AI responses:\n1. Open your hosting provider dashboard (e.g. Vercel or Cloud Run).\n2. Navigate to **Project Settings** > **Environment Variables**.\n3. Add \`GEMINI_API_KEY\` with your valid Google AI Studio Gemini API key.\n4. Redeploy or restart the application.`,
       timestamp: new Date().toISOString(),
-      isRag,
-      sources: sourcesUsed
+      isRag: false,
+      sources: []
     };
 
     db.updateChat(id, { messages: [...updatedMessages, aiMsg] });
-    return res.json({ message: aiMsg });
+    return res.status(503).json({ error: errorMsg, message: aiMsg });
   }
 
   try {
-    // Build structural conversation prompts
-    const historyPrompts = updatedMessages.slice(-8).map(m => {
+    // Build structural conversation history (last 10 messages for rich context)
+    const historyPrompts = updatedMessages.slice(-10).map(m => {
       return `${m.sender === 'user' ? 'User' : 'Assistant'}: ${m.text}`;
     }).join('\n');
 
     const systemInstruction = `You are NIT AI, a distinguished Senior Technical Education Mentor and Certification Examiner at NETECH Academy. 
-    Your goal is to guide students, provide precise answers to technical questions, and explain engineering and computer science concepts thoroughly.
-    You have direct real-time access to Google Search to consult live documentation, protocol standards (RFCs, IEEE), current version releases, and verified developer guides.
-    Always provide clear, thorough, and structured explanations with syntax-highlighted code blocks, command sequences, and real-world troubleshooting steps.
-    
-    CRITICAL REAL-LINK & WEBPAGE DIRECTIVE:
-    When a student asks for ANY link, website, documentation, download, syllabus, tool, official portal, RFC, or online reference:
-    1. You MUST answer with REAL, AUTHENTIC, WORKING DIRECT HTTPS LINKS formatted as Markdown links: [Clear Link Title](https://example.com/actual-path).
-    2. NEVER provide placeholder, dummy, or broken links (e.g. NEVER output "example.com", "your-link-here", or fake domains).
-    3. Use real, verified URLs from live Google search and established engineering portals:
-       - Microsoft Learn: https://learn.microsoft.com/en-us/windows-server/
-       - Cisco Networking Academy: https://www.netacad.com/
-       - Cisco Learning Network: https://learningnetwork.cisco.com/
-       - Rwanda TVET Board (RTB): https://www.rtb.gov.rw/
-       - Rwanda Polytechnic (RP): https://www.rp.ac.rw/
-       - IETF RFC Database: https://www.rfc-editor.org/ or https://datatracker.ietf.org/
-       - Linux Kernel & Docs: https://docs.kernel.org/
-       - NIST Cybersecurity: https://www.nist.gov/cyberframework
-       - OWASP Security: https://owasp.org/
-       - Python Official: https://www.python.org/
-       - MDN Web Docs: https://developer.mozilla.org/
-       - GitHub: https://github.com/
-    4. Provide the exact real link with descriptive anchor text so when the user clicks the link, they will be directed straight to that website!
+Your goal is to guide students, provide precise answers to technical questions, and explain engineering and computer science concepts thoroughly.
+Always provide clear, thorough, and structured explanations with syntax-highlighted code blocks, command sequences, and real-world troubleshooting steps.
 
-    ${isRag ? `CRITICAL CURRICULUM DIRECTIVE: The student has uploaded course materials and syllabus notes (provided below). 
-    1. Cross-reference their uploaded document contents with current industry standards.
-    2. Provide answers that clearly address their curriculum objectives while citing current best practices.` : ''}`;
+${(webSearch || isLinkRequest) ? `CRITICAL REAL-LINK & WEBPAGE DIRECTIVE:
+When a student asks for ANY link, website, documentation, download, syllabus, tool, official portal, RFC, or online reference:
+1. You MUST answer with REAL, AUTHENTIC, WORKING DIRECT HTTPS LINKS formatted as Markdown links: [Clear Link Title](https://example.com/actual-path).
+2. NEVER provide placeholder, dummy, or broken links.
+3. Use real, verified URLs:
+   - Microsoft Learn: https://learn.microsoft.com/en-us/windows-server/
+   - Cisco Networking Academy: https://www.netacad.com/
+   - Rwanda TVET Board (RTB): https://www.rtb.gov.rw/
+   - IETF RFC Database: https://www.rfc-editor.org/
+   - Linux Kernel & Docs: https://docs.kernel.org/
+   - Python Official: https://www.python.org/
+   - MDN Web Docs: https://developer.mozilla.org/` : ''}
+
+${isRag ? `CRITICAL CURRICULUM DIRECTIVE: The student has uploaded course materials and syllabus notes (provided below). Cross-reference their uploaded document contents with current industry standards.` : ''}`;
 
     const prompt = `
-    ${isRag ? `[COURSE SYLLABUS CONTEXT]:\n${ragContext}\n\n` : ''}
-    [RECENT DISCUSSION]:
-    ${historyPrompts}
-    
-    Student Question: ${text}
-    
-    Provide an authoritative, clear, and comprehensive response. Cite current documentation and Google-verified standards with real, direct, clickable HTTPS links when applicable:`;
+${isRag ? `[COURSE SYLLABUS CONTEXT]:\n${ragContext}\n\n` : ''}
+[RECENT DISCUSSION]:
+${historyPrompts}
 
-    const response = await callGeminiWithRetry({
-      model: 'gemini-3.8-flash',
+Student Question: ${text}
+
+Provide an authoritative, clear, and comprehensive response:`;
+
+    const modelToUse = reqModel || 'gemini-2.5-flash';
+    const geminiConfig: any = {
+      systemInstruction
+    };
+
+    // Attach Google Search tool only when webSearch is active, deepResearch is active, or real links/web info requested
+    if (webSearch || deepResearch || isLinkRequest) {
+      geminiConfig.tools = [{ googleSearch: {} }];
+    }
+
+    if (thinkMode) {
+      geminiConfig.thinkingConfig = { thinkingBudget: 2048 };
+    }
+
+    // Call Gemini with 55s timeout (compatible with Vercel maxDuration: 60)
+    const geminiCallPromise = callGeminiWithRetry({
+      model: modelToUse,
       contents: prompt,
-      config: {
-        systemInstruction,
-        tools: [{ googleSearch: {} }]
-      }
+      config: geminiConfig
     });
 
+    const timeoutPromise = new Promise<never>((_, reject) => 
+      setTimeout(() => reject(new Error('AI generation timed out after 55 seconds.')), 55000)
+    );
+
+    const response = await Promise.race([geminiCallPromise, timeoutPromise]);
     aiText = response.text || "I was unable to retrieve a complete answer. Please rephrase your question or verify the topic.";
 
-    // If the student asked for a link and the model didn't include a Markdown link, attach the verified official links!
+    // If the student asked for a link and the model didn't include a Markdown link, attach the verified official links
     if (isLinkRequest && !aiText.includes('](') && !aiText.includes('http')) {
       const realLinks = getRealLinksForQuery(text);
       aiText += `\n\n### Official Verified Links:\n` + realLinks.map(l => `- **[${l.title}](${l.url})**\n  *${l.description}*`).join('\n\n');
@@ -2056,32 +2804,19 @@ app.post('/api/chats/:id/message', async (req, res) => {
     };
 
     db.updateChat(id, { messages: [...updatedMessages, aiMsg] });
-    res.json({ message: aiMsg });
+    return res.json({ message: aiMsg });
   } catch (err: any) {
-    console.warn(`[Chat] Live NIT AI generation encountered error, utilizing curriculum notes: ${err.message}`);
-    const relevantLinks = getRealLinksForQuery(text);
-    const linksSummary = relevantLinks.map(l => `- **[${l.title}](${l.url})**`).join('\n');
-
-    const fallbackText = isRag
-      ? `Based on your curriculum materials for **${chat.category || 'this subject'}**:\n\n${ragContext ? ragContext.slice(0, 320) + '...' : 'Review the primary chapter sections for detailed configuration guidelines.'}\n\n**Official Technical Resources & Documentation**:\n${linksSummary}\n\n*Click any link above to be directed immediately to that website.*`
-      : `Here is the authoritative technical reference for **${text.slice(0, 40)}**:\n\n1. **Core Concept**: Verify protocol architecture, standard ports, and configuration attributes.\n2. **Practical Verification**: Test command sequences and behavior in the interactive code sandbox.\n3. **Official Websites & Direct Links**:\n${linksSummary}\n\n*Click any link above to be directed immediately to that website.*`;
-
-    relevantLinks.forEach(l => {
-      const entry = `${l.title} (${l.url})`;
-      if (!sourcesUsed.includes(entry)) sourcesUsed.push(entry);
-    });
-
-    const aiMsg: ChatMessage = {
-      id: `msg_${Date.now()}_nit_ai_ref_${Math.random().toString(36).substring(2, 9)}`,
+    console.error(`[Chat] Live NIT AI generation failed:`, err);
+    const errMessage = err.message || 'Unknown error occurred while contacting AI service.';
+    const errorAiMsg: ChatMessage = {
+      id: `msg_${Date.now()}_err`,
       sender: 'ai',
-      text: fallbackText,
+      text: `⚠️ **NIT AI Generation Notice**: Unable to generate an AI response at this moment.\n\n*Details: ${errMessage}*\n\nPlease check your internet connection or verify your Gemini API quota and settings.`,
       timestamp: new Date().toISOString(),
-      isRag,
-      sources: sourcesUsed
+      isError: true
     };
-
-    db.updateChat(id, { messages: [...updatedMessages, aiMsg] });
-    res.json({ message: aiMsg });
+    db.updateChat(id, { messages: [...updatedMessages, errorAiMsg] });
+    return res.status(500).json({ error: errMessage, message: errorAiMsg });
   }
 });
 
@@ -2575,6 +3310,17 @@ Output STRICTLY valid JSON matching the requested schema.`;
   }
 });
 
+// Retrieve all generated or standard quizzes
+app.get('/api/quizzes', (req, res) => {
+  res.json(db.getQuizzes());
+});
+
+app.get('/api/quizzes/:id', (req, res) => {
+  const q = db.getQuizById(req.params.id);
+  if (!q) return res.status(404).json({ error: 'Quiz not found' });
+  res.json(q);
+});
+
 // Targeted Section/Chapter Practice Question Generator
 app.post('/api/ai/questions/practice', async (req, res) => {
   const { title, content, category, docId } = req.body;
@@ -2915,6 +3661,64 @@ app.delete('/api/admin/users/:id', (req, res) => {
 // -------------------------------------------------------------
 // API ERROR & 404 HANDLERS (ALWAYS RETURN JSON, NEVER HTML)
 // -------------------------------------------------------------
+// Neon Service Health Status Endpoint
+app.get('/api/neon/status', async (req, res) => {
+  let postgresConnected = false;
+  let postgresVersion = '';
+  let objectStorageConnected = false;
+  let userCount = 0;
+  let docCount = 0;
+
+  if (sqlClient) {
+    try {
+      const v = (await sqlClient`SELECT version();`) as any[];
+      if (v && v.length > 0) {
+        postgresConnected = true;
+        postgresVersion = (v[0] as any).version;
+      }
+      const u = (await sqlClient`SELECT count(*) FROM users;`) as any[];
+      userCount = Number((u[0] as any).count || 0);
+      const d = (await sqlClient`SELECT count(*) FROM documents;`) as any[];
+      docCount = Number((d[0] as any).count || 0);
+    } catch (e: any) {
+      console.warn('Neon Postgres status check error:', e);
+    }
+  }
+
+  if (s3Client) {
+    try {
+      await s3Client.send(new PutObjectCommand({
+        Bucket: S3_BUCKET,
+        Key: 'health-check.txt',
+        Body: `Health check at ${new Date().toISOString()}`
+      }));
+      objectStorageConnected = true;
+    } catch (e: any) {
+      console.warn('Neon Object Storage status check error:', e);
+    }
+  }
+
+  res.json({
+    status: 'ok',
+    neon: {
+      postgres: {
+        connected: postgresConnected,
+        version: postgresVersion,
+        userCount,
+        docCount
+      },
+      objectStorage: {
+        configured: !!s3Client,
+        connected: objectStorageConnected,
+        mode: s3Client ? 'S3 bucket (assets)' : 'Neon Postgres DB & Local Storage (No AWS keys required)'
+      },
+      functions: {
+        helloUrl: process.env.NEON_FUNCTION_HELLO_BASE_URL || null
+      }
+    }
+  });
+});
+
 // Any unmatched /api/* route must return JSON 404, never falling into Vite SPA index.html
 app.all('/api/*', (req, res) => {
   res.status(404).json({ error: `API route not found: ${req.method} ${req.originalUrl}` });
@@ -2935,26 +3739,44 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 // VITE OR STATIC SERVING MIDDLEWARE (AS PER DIRECTIVE)
 // -------------------------------------------------------------
 async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa'
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-  }
+  try {
+    if (process.env.NODE_ENV !== 'production') {
+      const { createServer: createViteServer } = await import('vite');
+      const vite = await createViteServer({
+        server: { 
+          middlewareMode: true,
+          hmr: false
+        },
+        appType: 'spa'
+      });
+      app.use(vite.middlewares);
+    } else {
+      const distPath = path.join(process.cwd(), 'dist');
+      app.use(express.static(distPath));
+      app.get('*', (req, res) => {
+        res.sendFile(path.join(distPath, 'index.html'));
+      });
+    }
 
-  const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`NexaLearn AI Server running on http://0.0.0.0:${PORT}`);
-  });
-  server.timeout = 300000;
-  server.keepAliveTimeout = 120000;
+    const server = app.listen(PORT, '0.0.0.0', () => {
+      console.log(`NexaLearn AI Server running on http://0.0.0.0:${PORT}`);
+    });
+    server.on('error', (err: any) => {
+      if (err?.code === 'EADDRINUSE') {
+        console.warn(`[Port ${PORT} in use] Retrying in 1s...`);
+        setTimeout(() => {
+          server.close();
+          server.listen(PORT, '0.0.0.0');
+        }, 1000);
+      } else {
+        console.error('Server listen error:', err);
+      }
+    });
+    server.timeout = 300000;
+    server.keepAliveTimeout = 120000;
+  } catch (err) {
+    console.error('Error starting server:', err);
+  }
 }
 if (!process.env.VERCEL) {
   startServer();

@@ -69,11 +69,11 @@ export default function AboutUs({ darkMode }: AboutUsProps) {
           <div className="inline-flex items-center gap-1 text-teal-500 font-black text-xs uppercase tracking-widest font-mono">
             <Landmark className="w-4 h-4" /> Kigali, Rwanda
           </div>
-          <h2 className={`font-display text-3xl sm:text-4xl font-black tracking-tight leading-tight ${
+          <h1 className={`font-display text-3xl sm:text-4xl font-black tracking-tight leading-tight ${
             darkMode ? 'text-white' : 'text-teal-950'
           }`}>
-            Africa’s Premier Interactive Technical Education Hub
-          </h2>
+            About NETECH – Africa’s Premier Interactive Technical Education Hub
+          </h1>
           <p className="text-xs sm:text-sm leading-relaxed text-gray-500">
             NETECH bridges the gap in technical skills across Rwanda and East Africa. Our mission is to democratize training for Networking, Linux operations, Active Directory administration, Cyber Security, and more by pairing standard textbooks with intelligent, context-grounded NIT AI mentors and interactive sandboxes.
           </p>

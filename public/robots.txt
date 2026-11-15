@@ -1,6 +1,8 @@
-# robots.txt for NETECH
+# robots.txt for NET LEARN / NETECH Platform
 User-agent: *
 Allow: /
+Allow: /?tab=*
+Allow: /?category=*
 Allow: /api/documents
 Allow: /sitemap.xml
 Disallow: /api/auth/
@@ -9,4 +11,4 @@ Disallow: /api/progress/
 Disallow: /api/documents/upload
 Disallow: /api/upload-image
 
-Sitemap: /sitemap.xml
+Sitemap: https://net-learn-psi.vercel.app/sitemap.xml

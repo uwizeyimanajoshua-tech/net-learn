@@ -6,7 +6,8 @@ import {
   ArrowDown, Menu, X, Download, Play, Copy, Code2, ExternalLink,
   Plus, Search, Image as ImageIcon, Clock, Gift, RotateCcw,
   Paperclip, Folder, FolderCode, Brain, Mic, MicOff, Pin, PinOff,
-  ChevronDown, Cpu, ChevronLeft, PanelLeftClose, PanelLeftOpen, FileUp, User as UserIcon, LogOut, CheckCircle2
+  ChevronDown, Cpu, ChevronLeft, PanelLeftClose, PanelLeftOpen, FileUp, User as UserIcon, LogOut, CheckCircle2,
+  Square
 } from 'lucide-react';
 import type { ChatSession, ChatMessage, Document, CategoryName, User } from '../types.ts';
 import { CATEGORIES } from '../types.ts';
@@ -67,6 +68,15 @@ export default function AIChat({ userId, user, documents, initialDocId, darkMode
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  const handleStopGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setLoading(false);
+  };
 
   // Load chat sessions on mount
   useEffect(() => {
@@ -173,6 +183,7 @@ export default function AIChat({ userId, user, documents, initialDocId, darkMode
       messageContent = `[Attached files: ${fileNames}]\n${messageContent}`;
     }
 
+    // Immediately clear input fields so UI feels instantaneous
     if (!customText) {
       setText('');
       setAttachedFiles([]);
@@ -180,34 +191,7 @@ export default function AIChat({ userId, user, documents, initialDocId, darkMode
     }
     setLoading(true);
 
-    let currentSession = activeSession;
-    if (!currentSession) {
-      // Auto-create session on the fly
-      try {
-        const titleSnippet = rawContent.trim().slice(0, 32) || 'New Study Chat';
-        const createRes = await fetch('/api/chats', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId, title: titleSnippet, category: '', docId: selectedDocId || '' })
-        });
-        const createText = await createRes.text();
-        const createData = JSON.parse(createText);
-        if (createRes.ok && createData.chat) {
-          currentSession = createData.chat;
-          setSessions(prev => [createData.chat, ...prev]);
-          setActiveSession(createData.chat);
-        }
-      } catch (err) {
-        console.error('Auto session creation error:', err);
-      }
-    }
-
-    if (!currentSession) {
-      setLoading(false);
-      return;
-    }
-
-    // Optimistically update UI with user message
+    // Create optimistic user message immediately
     const userMsg: ChatMessage = {
       id: `msg_user_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
       sender: 'user',
@@ -215,17 +199,45 @@ export default function AIChat({ userId, user, documents, initialDocId, darkMode
       timestamp: new Date().toISOString()
     };
 
-    const updatedActive = {
-      ...currentSession,
-      messages: [...currentSession.messages, userMsg]
-    };
-    setActiveSession(updatedActive);
-    setSessions(prev => prev.map(s => s.id === currentSession!.id ? updatedActive : s));
+    // Determine target session or create an immediate in-memory session so the message shows instantly!
+    let currentSession = activeSession;
+    let targetSessionId = currentSession?.id;
+
+    if (!currentSession) {
+      targetSessionId = `chat_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      currentSession = {
+        id: targetSessionId,
+        userId,
+        title: rawContent.trim().slice(0, 32) || 'New Technical Chat',
+        category: '',
+        docId: selectedDocId || '',
+        messages: [userMsg],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      setActiveSession(currentSession);
+      setSessions(prev => [currentSession!, ...prev]);
+    } else {
+      const updatedActive = {
+        ...currentSession,
+        messages: [...currentSession.messages, userMsg]
+      };
+      setActiveSession(updatedActive);
+      setSessions(prev => prev.map(s => s.id === currentSession!.id ? updatedActive : s));
+    }
+
+    // Scroll chat into view immediately
+    setTimeout(() => scrollToBottom('smooth'), 50);
+
+    // Create AbortController to support stopping generation
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
 
     try {
-      const res = await fetch(`/api/chats/${currentSession.id}/message`, {
+      const res = await fetch(`/api/chats/${targetSessionId}/message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: abortController.signal,
         body: JSON.stringify({
           text: messageContent,
           userId,
@@ -235,31 +247,72 @@ export default function AIChat({ userId, user, documents, initialDocId, darkMode
           deepResearch: deepResearchMode
         })
       });
+
       const responseText = await res.text();
       let data: any = {};
-      try { data = JSON.parse(responseText); } catch {
+      try { 
+        data = JSON.parse(responseText); 
+      } catch {
         data = {
+          error: responseText || `HTTP ${res.status} Error`,
           message: {
-            id: `msg_ai_${Date.now()}`,
+            id: `msg_ai_err_${Date.now()}`,
             sender: 'ai',
-            text: 'I have analyzed your query based on technical curriculum standards. For in-depth references, consult [Rwanda TVET Board (RTB)](https://www.rtb.gov.rw/) and [Cisco Networking Academy](https://www.netacad.com/).',
+            text: `⚠️ **Server Response Error**: Received invalid response format (Status ${res.status}). Please check server logs.`,
             timestamp: new Date().toISOString()
           }
         };
       }
 
-      if (res.ok && data.message) {
-        const finalActive = {
-          ...updatedActive,
-          messages: [...updatedActive.messages, data.message]
+      if (data && data.message) {
+        setActiveSession(prev => {
+          if (!prev) return null;
+          // Avoid duplicate messages
+          const existingIds = new Set(prev.messages.map(m => m.id));
+          if (existingIds.has(data.message.id)) return prev;
+          const updated = {
+            ...prev,
+            messages: [...prev.messages, data.message]
+          };
+          setSessions(sPrev => sPrev.map(s => s.id === updated.id ? updated : s));
+          return updated;
+        });
+      } else if (data && data.error) {
+        const errorMsg: ChatMessage = {
+          id: `msg_ai_err_${Date.now()}`,
+          sender: 'ai',
+          text: `⚠️ **AI Service Notice**: ${data.error}`,
+          timestamp: new Date().toISOString()
         };
-        setActiveSession(finalActive);
-        setSessions(prev => prev.map(s => s.id === currentSession!.id ? finalActive : s));
+        setActiveSession(prev => {
+          if (!prev) return null;
+          const updated = { ...prev, messages: [...prev.messages, errorMsg] };
+          setSessions(sPrev => sPrev.map(s => s.id === updated.id ? updated : s));
+          return updated;
+        });
       }
-    } catch (err) {
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        console.log('AI response generation stopped by user.');
+        return;
+      }
       console.error('Failed to get message response:', err);
+      const networkErrorMsg: ChatMessage = {
+        id: `msg_ai_network_err_${Date.now()}`,
+        sender: 'ai',
+        text: `⚠️ **Connection Error**: Unable to communicate with the server. Please check your internet connection or deployment status.\n\n*Details: ${err.message || 'Network request failed'}*`,
+        timestamp: new Date().toISOString()
+      };
+      setActiveSession(prev => {
+        if (!prev) return null;
+        const updated = { ...prev, messages: [...prev.messages, networkErrorMsg] };
+        setSessions(sPrev => sPrev.map(s => s.id === updated.id ? updated : s));
+        return updated;
+      });
     } finally {
       setLoading(false);
+      abortControllerRef.current = null;
+      setTimeout(() => scrollToBottom('smooth'), 100);
     }
   };
 
@@ -947,18 +1000,18 @@ export default function AIChat({ userId, user, documents, initialDocId, darkMode
                     value={text}
                     onChange={e => setText(e.target.value)}
                     onKeyDown={e => {
-                      if (e.key === 'Enter') {
+                      if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
                         handleSendMessage();
                       }
                     }}
-                    placeholder="Ask NETECH AI..."
+                    placeholder="Ask NETECH AI (or press Enter)..."
                     className={`flex-1 bg-transparent border-0 focus:outline-none text-sm font-medium px-2 ${
                       darkMode ? 'text-gray-100 placeholder-gray-400' : 'text-gray-900 placeholder-gray-400'
                     }`}
                   />
 
-                  {/* Right side controls: Think + Mic + Send */}
+                  {/* Right side controls: Think + Mic + Send/Stop */}
                   <div className="flex items-center gap-1.5 shrink-0">
                     {/* Think Button */}
                     <button
@@ -989,20 +1042,31 @@ export default function AIChat({ userId, user, documents, initialDocId, darkMode
                       {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                     </button>
 
-                    {/* Send Button / Voice Orb */}
-                    <button
-                      type="button"
-                      onClick={() => handleSendMessage()}
-                      disabled={!text.trim() && attachedFiles.length === 0}
-                      className={`w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer shrink-0 ${
-                        text.trim() || attachedFiles.length > 0
-                          ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-xs active:scale-95'
-                          : 'bg-blue-600/40 text-blue-200 opacity-60 cursor-not-allowed'
-                      }`}
-                      title="Send message"
-                    >
-                      <Send className="w-3.5 h-3.5" />
-                    </button>
+                    {/* Send / Stop Toggle Button matching design */}
+                    {loading ? (
+                      <button
+                        type="button"
+                        onClick={handleStopGeneration}
+                        className="w-8 h-8 rounded-full bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center transition-all cursor-pointer shrink-0 shadow-xs active:scale-95 animate-pulse"
+                        title="Stop generation"
+                      >
+                        <Square className="w-3.5 h-3.5 fill-white text-white" />
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleSendMessage()}
+                        disabled={!text.trim() && attachedFiles.length === 0}
+                        className={`w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer shrink-0 ${
+                          text.trim() || attachedFiles.length > 0
+                            ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-xs active:scale-95'
+                            : 'bg-blue-600/40 text-blue-200 opacity-60 cursor-not-allowed'
+                        }`}
+                        title="Send message"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -1174,12 +1238,12 @@ export default function AIChat({ userId, user, documents, initialDocId, darkMode
                   value={text}
                   onChange={e => setText(e.target.value)}
                   onKeyDown={e => {
-                    if (e.key === 'Enter') {
+                    if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
                       handleSendMessage();
                     }
                   }}
-                  placeholder="Ask NETECH AI..."
+                  placeholder="Ask NETECH AI (or press Enter)..."
                   className={`flex-1 bg-transparent border-0 focus:outline-none text-sm font-medium px-2 ${
                     darkMode ? 'text-gray-100 placeholder-gray-400' : 'text-gray-900 placeholder-gray-400'
                   }`}
@@ -1213,18 +1277,31 @@ export default function AIChat({ userId, user, documents, initialDocId, darkMode
                     {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={() => handleSendMessage()}
-                    disabled={!text.trim() && attachedFiles.length === 0}
-                    className={`w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer shrink-0 ${
-                      text.trim() || attachedFiles.length > 0
-                        ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-xs active:scale-95'
-                        : 'bg-blue-600/40 text-blue-200 opacity-60 cursor-not-allowed'
-                    }`}
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                  </button>
+                  {/* Send / Stop Toggle Button matching design */}
+                  {loading ? (
+                    <button
+                      type="button"
+                      onClick={handleStopGeneration}
+                      className="w-8 h-8 rounded-full bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center transition-all cursor-pointer shrink-0 shadow-xs active:scale-95 animate-pulse"
+                      title="Stop generation"
+                    >
+                      <Square className="w-3.5 h-3.5 fill-white text-white" />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleSendMessage()}
+                      disabled={!text.trim() && attachedFiles.length === 0}
+                      className={`w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer shrink-0 ${
+                        text.trim() || attachedFiles.length > 0
+                          ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-xs active:scale-95'
+                          : 'bg-blue-600/40 text-blue-200 opacity-60 cursor-not-allowed'
+                      }`}
+                      title="Send message"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
 

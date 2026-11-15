@@ -1,13 +1,21 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut as fbSignOut, User as FirebaseUser } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer, collection, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, where } from 'firebase/firestore';
+import { initializeFirestore, getFirestore, doc, getDocFromServer, collection, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, where } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 // Initialize Firebase client instance
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// Database instance explicitly bound to the provisioned enterprise databaseId
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+// Database instance explicitly configured with long polling auto-detection to prevent GrpcConnection Listen stream RST_STREAM errors
+let firestoreInstance;
+try {
+  firestoreInstance = initializeFirestore(app, {
+    experimentalAutoDetectLongPolling: true,
+  }, firebaseConfig.firestoreDatabaseId);
+} catch {
+  firestoreInstance = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+}
+export const db = firestoreInstance;
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
@@ -64,9 +72,11 @@ export async function testConnection() {
   try {
     await getDocFromServer(doc(db, 'test', 'ping'));
     console.log('[Firebase] Connected to Firestore database:', firebaseConfig.firestoreDatabaseId);
-  } catch (error) {
+  } catch (error: any) {
     if (error instanceof Error && error.message.includes('the client is offline')) {
       console.warn('[Firebase] Client is offline. Please check network.');
+    } else {
+      console.warn('[Firebase] Connection ping notice:', error?.message || error);
     }
   }
 }
