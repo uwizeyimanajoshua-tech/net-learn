@@ -17,14 +17,14 @@ async function extractTextInBrowserForLargeFile(file: File): Promise<string> {
   const nameLower = file.name.toLowerCase();
   try {
     if (nameLower.endsWith('.txt') || nameLower.endsWith('.md') || nameLower.endsWith('.csv') || nameLower.endsWith('.json') || file.type.startsWith('text/')) {
-      const txt = await file.slice(0, 600 * 1024).text();
-      return txt.slice(0, 320000);
+      const txt = await file.slice(0, 900 * 1024).text();
+      return txt.slice(0, 750000);
     }
     if (nameLower.endsWith('.pdf') || file.type === 'application/pdf') {
       const buf = await file.arrayBuffer();
       const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buf) });
       const pdf = await loadingTask.promise;
-      const maxPages = Math.min(pdf.numPages, 150);
+      const maxPages = Math.min(pdf.numPages, 500);
       let combined = '';
       for (let p = 1; p <= maxPages; p++) {
         const page = await pdf.getPage(p);
@@ -46,9 +46,9 @@ async function extractTextInBrowserForLargeFile(file: File): Promise<string> {
         if (pageText) {
           combined += (combined ? '\n\n' : '') + pageText;
         }
-        if (combined.length >= 320000) break;
+        if (combined.length >= 750000) break;
       }
-      return combined.slice(0, 320000);
+      return combined.slice(0, 750000);
     }
   } catch (err) {
     console.warn('Browser-side file extraction notice:', err);
@@ -343,6 +343,7 @@ export default function DocumentViewer({
   const [viewingDoc, setViewingDoc] = useState<Document | null>(
     activeDocFilter ? documents.find(d => d.id === activeDocFilter) || null : null
   );
+  const [loadingFullDoc, setLoadingFullDoc] = useState<boolean>(false);
 
   // Hydrate full document sections/text on demand (for fast Vercel list payloads)
   const openDocument = async (docItem: Document) => {
@@ -351,6 +352,7 @@ export default function DocumentViewer({
     window.scrollTo({ top: 0, behavior: 'smooth' });
 
     if ((docItem as any).isPartial) {
+      setLoadingFullDoc(true);
       let fullDoc: Document | null = null;
       try {
         const res = await fetch(`/api/documents/${docItem.id}`, { cache: 'no-store' });
@@ -378,8 +380,9 @@ export default function DocumentViewer({
       }
 
       if (fullDoc) {
-        setViewingDoc(prev => (prev && prev.id === docItem.id ? fullDoc! : prev));
+        setViewingDoc(prev => (prev && prev.id === docItem.id ? { ...fullDoc!, isPartial: false } as Document : prev));
       }
+      setLoadingFullDoc(false);
     }
   };
 
@@ -1521,28 +1524,36 @@ export default function DocumentViewer({
             </div>
           </div>
         ) : (
-          <W3SchoolsNoteViewer
-            document={viewingDoc}
-            darkMode={darkMode}
-            onNavigateHome={() => {
-              onNavigateToSection('documents', undefined, undefined);
-              setViewingDoc(null);
-              setActiveSummary(null);
-            }}
-            onPrevDoc={prevDoc ? handlePrev : undefined}
-            onNextDoc={nextDoc ? handleNext : undefined}
-            hasPrevDoc={Boolean(prevDoc)}
-            hasNextDoc={Boolean(nextDoc)}
-            onDeleteDoc={isAdmin ? () => setDocToDelete(viewingDoc) : undefined}
-            onEditDoc={isAdmin ? handleStartEdit : undefined}
-            userRole={isAdmin ? 'admin' : userRole}
-            onLaunchLinuxSimulator={() => {
-              onNavigateToSection('linux_sim', viewingDoc.category as CategoryName, viewingDoc.id);
-            }}
-            onLaunchPythonSimulator={() => {
-              onNavigateToSection('python_sim', viewingDoc.category as CategoryName, viewingDoc.id);
-            }}
-          />
+          <>
+            {loadingFullDoc && (
+              <div className="mb-3 px-4 py-2 rounded-xl bg-[#04aa6d]/10 border border-[#04aa6d]/30 text-[#04aa6d] text-xs font-bold flex items-center gap-2">
+                <span className="w-3.5 h-3.5 rounded-full border-2 border-[#04aa6d] border-t-transparent animate-spin inline-block" />
+                <span>Loading complete notes for all indicative content sections...</span>
+              </div>
+            )}
+            <W3SchoolsNoteViewer
+              document={viewingDoc}
+              darkMode={darkMode}
+              onNavigateHome={() => {
+                onNavigateToSection('documents', undefined, undefined);
+                setViewingDoc(null);
+                setActiveSummary(null);
+              }}
+              onPrevDoc={prevDoc ? handlePrev : undefined}
+              onNextDoc={nextDoc ? handleNext : undefined}
+              hasPrevDoc={Boolean(prevDoc)}
+              hasNextDoc={Boolean(nextDoc)}
+              onDeleteDoc={isAdmin ? () => setDocToDelete(viewingDoc) : undefined}
+              onEditDoc={isAdmin ? handleStartEdit : undefined}
+              userRole={isAdmin ? 'admin' : userRole}
+              onLaunchLinuxSimulator={() => {
+                onNavigateToSection('linux_sim', viewingDoc.category as CategoryName, viewingDoc.id);
+              }}
+              onLaunchPythonSimulator={() => {
+                onNavigateToSection('python_sim', viewingDoc.category as CategoryName, viewingDoc.id);
+              }}
+            />
+          </>
         )}
 
         {renderDeleteModal()}

@@ -71,7 +71,28 @@ function sanitizeForFirestore(obj: any): any {
   return result;
 }
 
+// Helper to detect broken RTB TOC-stub sections or duplicate empty indicative content slices
+export function hasBrokenCurriculumStubs(sections?: any[]): boolean {
+  if (!Array.isArray(sections) || sections.length === 0) return false;
+  let tocDashTitles = 0;
+  let emptyIndicative = 0;
+  let tocSectionCount = 0;
+  for (const s of sections) {
+    const title = String(s?.title || '');
+    const content = String(s?.content || '');
+    if (/table\s+of\s+content/i.test(title)) tocSectionCount++;
+    if (/(?:-{2,}|\.{2,}|–{2,})\s*[0-9ivxlc]+\s*$/i.test(title) || /(?:-{3,})\s*\d+\s*$/.test(content.trim())) {
+      tocDashTitles++;
+    }
+    if (/indicative\s+content/i.test(title) && content.length < 320) {
+      emptyIndicative++;
+    }
+  }
+  return tocSectionCount > 1 || tocDashTitles >= 2 || emptyIndicative >= 2;
+}
+
 // Keep every Firestore document safely under Firestore's 1 MiB (1,048,576 bytes) ceiling
+// while preserving ALL curriculum sections and Indicative Content notes.
 function prepareDocumentForFirestore(docObj: any): Record<string, any> {
   const clean: any = sanitizeForFirestore(docObj);
   if (typeof clean.fileData === 'string' && clean.fileData.length > 260000) {
@@ -80,8 +101,8 @@ function prepareDocumentForFirestore(docObj: any): Record<string, any> {
   if (typeof clean.textContent === 'string' && clean.textContent.length > 200000) {
     clean.textContent = clean.textContent.slice(0, 200000);
   }
-  if (Array.isArray(clean.splitContent) && clean.splitContent.length > 30) {
-    clean.splitContent = clean.splitContent.slice(0, 30);
+  if (Array.isArray(clean.splitContent) && clean.splitContent.length > 120) {
+    clean.splitContent = clean.splitContent.slice(0, 120);
   }
 
   const MAX_BYTES = 820000;
@@ -90,22 +111,48 @@ function prepareDocumentForFirestore(docObj: any): Record<string, any> {
     delete clean.fileData;
     serializedLen = Buffer.byteLength(JSON.stringify(clean), 'utf8');
   }
+
+  // Strip duplicated inline data:image/svg+xml markdown from splitContent if images[] already stores figures
   if (serializedLen > MAX_BYTES && Array.isArray(clean.splitContent)) {
     clean.splitContent = clean.splitContent.map((sec: any) => ({
       ...sec,
-      content: typeof sec?.content === 'string' ? sec.content.slice(0, 8000) : '',
+      content: typeof sec?.content === 'string'
+        ? sec.content.replace(/!\[[^\]]*\]\(data:image\/svg\+xml[^)]+\)\s*/g, '')
+        : '',
+    }));
+    serializedLen = Buffer.byteLength(JSON.stringify(clean), 'utf8');
+  }
+
+  // Trim redundant raw textContent FIRST before ever touching section notes
+  if (serializedLen > MAX_BYTES && typeof clean.textContent === 'string') {
+    clean.textContent = clean.textContent.slice(0, 100000);
+    serializedLen = Buffer.byteLength(JSON.stringify(clean), 'utf8');
+  }
+  if (serializedLen > MAX_BYTES && typeof clean.textContent === 'string') {
+    clean.textContent = clean.textContent.slice(0, 25000);
+    serializedLen = Buffer.byteLength(JSON.stringify(clean), 'utf8');
+  }
+  if (serializedLen > MAX_BYTES && typeof clean.textContent === 'string') {
+    clean.textContent = clean.textContent.slice(0, 6000);
+    serializedLen = Buffer.byteLength(JSON.stringify(clean), 'utf8');
+  }
+
+  // Only if splitContent ALONE still exceeds budget, trim per-section proportionally while keeping EVERY section
+  if (serializedLen > MAX_BYTES && Array.isArray(clean.splitContent) && clean.splitContent.length > 0) {
+    const perSecBudget = Math.max(1500, Math.floor(700000 / clean.splitContent.length));
+    clean.splitContent = clean.splitContent.map((sec: any) => ({
+      ...sec,
+      content: typeof sec?.content === 'string' ? sec.content.slice(0, perSecBudget) : '',
       images: Array.isArray(sec?.images) ? sec.images.slice(0, 1) : undefined
     }));
     serializedLen = Buffer.byteLength(JSON.stringify(clean), 'utf8');
   }
-  if (serializedLen > MAX_BYTES && typeof clean.textContent === 'string') {
-    clean.textContent = clean.textContent.slice(0, 60000);
-    serializedLen = Buffer.byteLength(JSON.stringify(clean), 'utf8');
-  }
-  if (serializedLen > MAX_BYTES && Array.isArray(clean.splitContent)) {
-    clean.splitContent = clean.splitContent.slice(0, 12).map((sec: any) => ({
+
+  if (serializedLen > MAX_BYTES && Array.isArray(clean.splitContent) && clean.splitContent.length > 0) {
+    const strictBudget = Math.max(800, Math.floor(620000 / clean.splitContent.length));
+    clean.splitContent = clean.splitContent.map((sec: any) => ({
       ...sec,
-      content: typeof sec?.content === 'string' ? sec.content.slice(0, 3500) : '',
+      content: typeof sec?.content === 'string' ? sec.content.slice(0, strictBudget) : '',
       images: undefined
     }));
   }
@@ -984,7 +1031,12 @@ export async function syncFromFirestore() {
           const existing = docMap.get(fd.id);
           if (existing) {
             const merged: Document = { ...existing, ...fd };
-            if (existing.splitContent && existing.splitContent.length > (fd.splitContent?.length || 0)) {
+            const existingClean = existing.splitContent && existing.splitContent.length > 0 && !hasBrokenCurriculumStubs(existing.splitContent);
+            const fsBroken = hasBrokenCurriculumStubs(fd.splitContent);
+            if (
+              (existingClean && fsBroken) ||
+              (existing.splitContent && existing.splitContent.length > (fd.splitContent?.length || 0) && !hasBrokenCurriculumStubs(existing.splitContent))
+            ) {
               merged.splitContent = existing.splitContent;
             }
             if (existing.textContent && existing.textContent.length > (fd.textContent?.length || 0)) {
@@ -1002,14 +1054,21 @@ export async function syncFromFirestore() {
       lastFirestoreSyncAt = Date.now();
       console.log(`[Firestore] Successfully merged ${localDB.documents.length} total documents (Firestore had ${firestoreDocs.length}).`);
 
-      // 3. Ensure any local documents not yet in Firestore or missing sections get uploaded to Firestore
+      // 3. Ensure any local documents not yet in Firestore, missing sections, or repaired locally get uploaded to Firestore
       for (const docItem of localDB.documents) {
         const inFs = firestoreDocs.find(f => f.id === docItem.id);
-        if (!inFs || (docItem.splitContent && (!inFs.splitContent || inFs.splitContent.length === 0))) {
+        const localIsClean = docItem.splitContent && docItem.splitContent.length > 0 && !hasBrokenCurriculumStubs(docItem.splitContent);
+        const fsNeedsUpgrade = inFs && localIsClean && (
+          !inFs.splitContent ||
+          inFs.splitContent.length === 0 ||
+          hasBrokenCurriculumStubs(inFs.splitContent) ||
+          docItem.splitContent.length > inFs.splitContent.length
+        );
+        if (!inFs || fsNeedsUpgrade) {
           try {
             const firestoreDoc = prepareDocumentForFirestore(docItem);
             await setDoc(doc(dbFirestore!, 'documents', docItem.id), firestoreDoc, { merge: true });
-            console.log(`[Firestore] Seeded doc to Firestore: ${docItem.id} (${docItem.name})`);
+            console.log(`[Firestore] Synced clean doc to Firestore: ${docItem.id} (${docItem.name}, ${firestoreDoc.splitContent?.length || 0} sections)`);
           } catch (fsWriteErr: any) {
             console.warn(`[Firestore] Document sync notice for ${docItem.id}:`, fsWriteErr?.message || fsWriteErr);
           }

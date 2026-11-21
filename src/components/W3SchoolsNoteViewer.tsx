@@ -176,7 +176,16 @@ export default function W3SchoolsNoteViewer({
     const indMatch = title.match(/(\d+\.\d+)/);
     if (indMatch) {
       const num = indMatch[1];
-      matchedIndex = sections.findIndex(s => s.title.includes(num));
+      const escapedNum = num.replace('.', '\\.');
+      const indRegex = new RegExp(`indicative\\s+content\\s+${escapedNum}\\b`, 'i');
+      matchedIndex = sections.findIndex(s => indRegex.test(s.title) && (s.content || '').length > 200);
+      if (matchedIndex === -1) {
+        matchedIndex = sections.findIndex(s => indRegex.test(s.title));
+      }
+      if (matchedIndex === -1) {
+        const wordRegex = new RegExp(`\\b${escapedNum}\\b`);
+        matchedIndex = sections.findIndex(s => wordRegex.test(s.title) && !/table\s+of\s+content/i.test(s.title));
+      }
     }
 
     // 1b. Assessment e.g. "Learning outcome 1 end assessment"
@@ -198,7 +207,7 @@ export default function W3SchoolsNoteViewer({
         const outcomeNum = outcomeMatch[1];
         matchedIndex = sections.findIndex(s => {
           const lower = s.title.toLowerCase();
-          return lower.includes(`outcome ${outcomeNum}`) && !lower.includes('indicative') && !lower.includes('assessment');
+          return new RegExp(`outcome\\s+${outcomeNum}\\b`, 'i').test(lower) && !lower.includes('indicative') && !lower.includes('assessment');
         });
       }
     }
@@ -314,6 +323,16 @@ export default function W3SchoolsNoteViewer({
       setTimeout(() => {
         setJumpToast(prev => prev ? { ...prev, visible: false } : null);
       }, 4000);
+    } else {
+      setTocDrawerOpen(false);
+      setJumpToast({
+        message: `Section not in extracted text: ${title}`,
+        sub: page ? `Page ${page} — re-upload PDF to index later pages` : undefined,
+        visible: true
+      });
+      setTimeout(() => {
+        setJumpToast(prev => prev ? { ...prev, visible: false } : null);
+      }, 4500);
     }
   };
 

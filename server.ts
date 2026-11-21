@@ -7,7 +7,7 @@ import dotenv from 'dotenv';
 import { GoogleGenAI, Type } from '@google/genai';
 import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { db, sqlClient, syncFromFirestore, syncDocumentsIfStale, syncAppCollectionsIfStale } from './src/db/store.js';
+import { db, sqlClient, syncFromFirestore, syncDocumentsIfStale, syncAppCollectionsIfStale, hasBrokenCurriculumStubs } from './src/db/store.js';
 import { CATEGORIES } from './src/types.js';
 import type { ChatMessage, ChatSession, Document, DocumentSection, AISummary, Quiz, QuizQuestion, Flashcard } from './src/types.js';
 
@@ -674,96 +674,198 @@ function formatAndPartitionLikeWindowServer(
   const generatedImages = generateCourseSvgDiagrams(category, filename);
   const normalized = (rawText || '').replace(/\r\n/g, '\n').trim();
 
-  // 2. DETECT RTB / TVET CURRICULUM MANUALS (like Window Server & Linux Server)
-  const isCurriculumManual = 
+  const isTocReferenceLine = (line: string) =>
+    /(?:-{2,}|\.{2,}|_{2,}|–{2,}|—{2,})\s*[0-9ivxlc]+\s*$/i.test(line.trim()) ||
+    /-(?:\s*|\d)[0-9]{1,3}\s*$/.test(line.trim());
+
+  // 2. DETECT RTB / TVET CURRICULUM MANUALS (like Window Server, Linux Server, Network Fundamentals, Wide Area Network, ML)
+  const isCurriculumManual =
     /learning\s+outcome\s+\d+/i.test(normalized) ||
     /indicative\s+content\s+\d+/i.test(normalized) ||
     /module\s+code\s+and\s+title/i.test(normalized) ||
     /table\s+of\s+content/i.test(normalized);
 
   if (isCurriculumManual) {
-    // Regex markers for RTB style
-    const markerRegex = /(?:TABLE\s+OF\s+CONTENT[S]?|MODULE\s+CODE\s+AND\s+TITLE[:\s][^\n]+|Learning\s+Outcome\s+\d+[:\s][^\n]+|Indicative\s+content\s+\d+\.\d+[:\s][^\n]+|Learning\s+outcome\s+\d+\s+end\s+assessment[^\n]*)/gi;
-    
-    // Find all occurrences
-    const matches: Array<{ title: string; index: number }> = [];
-    let m: RegExpExecArray | null;
-    while ((m = markerRegex.exec(normalized)) !== null) {
-      matches.push({ title: m[0].trim(), index: m.index });
+    const lineStartOf = (idx: number) => {
+      const nl = normalized.lastIndexOf('\n', idx);
+      return nl === -1 ? 0 : nl + 1;
+    };
+    const fullLineAt = (idx: number) => {
+      const start = lineStartOf(idx);
+      const end = normalized.indexOf('\n', idx);
+      return normalized.slice(start, end === -1 ? normalized.length : end).trim();
+    };
+
+    // 2a. Find the true start of body content AFTER Table of Contents / Acronyms
+    let bodyStartIndex = -1;
+    const modCodeRegex = /MODULE\s+CODE\s+AND\s+TITLE/gi;
+    let modMatch: RegExpExecArray | null;
+    while ((modMatch = modCodeRegex.exec(normalized)) !== null) {
+      const line = fullLineAt(modMatch.index);
+      if (!isTocReferenceLine(line)) {
+        bodyStartIndex = lineStartOf(modMatch.index);
+        break;
+      }
     }
 
-    // Filter out TOC entries (which usually cluster in the first 7,000 chars)
-    let bodyMatches: Array<{ title: string; index: number }> = [];
-    const tocEndEstimate = normalized.indexOf('MODULE CODE AND TITLE:', 3000);
-    const bodyStartIndex = tocEndEstimate !== -1 ? tocEndEstimate : 0;
-
-    matches.forEach(item => {
-      if (item.title.toUpperCase().includes('TABLE OF CONTENT')) {
-        bodyMatches.push(item);
-      } else if (item.index >= bodyStartIndex) {
-        bodyMatches.push(item);
+    if (bodyStartIndex === -1) {
+      const firstIndRegex = /Indicative\s+content\s+\d+\.\d+/gi;
+      let indMatch: RegExpExecArray | null;
+      while ((indMatch = firstIndRegex.exec(normalized)) !== null) {
+        const line = fullLineAt(indMatch.index);
+        if (!isTocReferenceLine(line)) {
+          bodyStartIndex = Math.max(0, lineStartOf(indMatch.index) - 3500);
+          break;
+        }
       }
-    });
+    }
 
-    // Ensure we have at least 3 distinct sections
-    if (bodyMatches.length >= 3) {
-      const sections: DocumentSection[] = [];
-      const tocItems: string[] = [];
+    if (bodyStartIndex === -1) {
+      // Fall back to position after last TOC dashed line in the first 25,000 chars
+      const headSlice = normalized.slice(0, Math.min(normalized.length, 25000));
+      const headLines = headSlice.split('\n');
+      let pos = 0;
+      let lastTocEnd = 0;
+      for (const hl of headLines) {
+        if (isTocReferenceLine(hl)) {
+          lastTocEnd = pos + hl.length + 1;
+        }
+        pos += hl.length + 1;
+      }
+      bodyStartIndex = lastTocEnd;
+    }
 
-      for (let i = 0; i < bodyMatches.length; i++) {
-        const current = bodyMatches[i];
-        const nextIndex = (i + 1 < bodyMatches.length) ? bodyMatches[i + 1].index : normalized.length;
-        let chunk = normalized.slice(current.index, nextIndex).trim();
+    // 2b. Collect real front-matter TOC entries if present
+    const frontSlice = normalized.slice(0, bodyStartIndex);
+    const extractedTocLines = frontSlice
+      .split('\n')
+      .map(l => l.trim())
+      .filter(l => l.length > 8 && isTocReferenceLine(l) && !/table\s+of\s+content/i.test(l));
+
+    // 2c. Scan body markers strictly from bodyStartIndex onward
+    const bodyMarkerRegex = /(?:^|\n)\s*(?:MODULE\s+CODE\s+AND\s+TITLE[:\s][^\n]*|Learning\s+Outcome\s+\d+[^\n]*|Indicative\s+content\s+\d+\.\d+[^\n]*|Learning\s+outcome\s+\d+\s+end\s+assessment[^\n]*)/gi;
+    bodyMarkerRegex.lastIndex = bodyStartIndex;
+
+    const rawBodyMatches: Array<{ title: string; index: number; kind: 'module' | 'lo' | 'indicative' | 'assessment' }> = [];
+    let bm: RegExpExecArray | null;
+    while ((bm = bodyMarkerRegex.exec(normalized)) !== null) {
+      const matchText = bm[0].trim();
+      const actualIdx = bm.index + (bm[0].length - bm[0].trimStart().length);
+      if (actualIdx < bodyStartIndex) continue;
+      if (isTocReferenceLine(matchText)) continue;
+
+      const lower = matchText.toLowerCase();
+      let kind: 'module' | 'lo' | 'indicative' | 'assessment' = 'indicative';
+      if (lower.startsWith('module code')) kind = 'module';
+      else if (/end\s+assessment/i.test(lower)) kind = 'assessment';
+      else if (/^learning\s+outcome\s+\d+/i.test(lower)) kind = 'lo';
+
+      rawBodyMatches.push({ title: matchText, index: actualIdx, kind });
+    }
+
+    // 2d. Deduplicate Module Overview LO bullet list & cover banner duplicates
+    const keptMatches: typeof rawBodyMatches = [];
+    for (let i = 0; i < rawBodyMatches.length; i++) {
+      const cur = rawBodyMatches[i];
+      const next = rawBodyMatches[i + 1];
+      const gapToNext = next ? next.index - cur.index : normalized.length - cur.index;
+
+      if (cur.kind === 'lo') {
+        const curNumMatch = cur.title.match(/learning\s+outcome\s+(\d+)/i);
+        const curNum = curNumMatch ? curNumMatch[1] : '';
+
+        // Skip 1-line summary table items right under MODULE CODE AND TITLE (each LO listed ~45-180 chars apart)
+        if (next && next.kind === 'lo' && gapToNext < 260) {
+          const nextNumMatch = next.title.match(/learning\s+outcome\s+(\d+)/i);
+          const nextNum = nextNumMatch ? nextNumMatch[1] : '';
+          if (curNum && nextNum && curNum !== nextNum) {
+            continue;
+          }
+        }
+
+        // Collapse cover-page repetition of the exact same Learning Outcome N within 1,600 chars
+        const prevKept = keptMatches[keptMatches.length - 1];
+        if (prevKept && prevKept.kind === 'lo') {
+          const prevNumMatch = prevKept.title.match(/learning\s+outcome\s+(\d+)/i);
+          if (prevNumMatch && curNum && prevNumMatch[1] === curNum && (cur.index - prevKept.index) < 1600) {
+            continue;
+          }
+        }
+      }
+
+      keptMatches.push(cur);
+    }
+
+    if (keptMatches.length >= 3) {
+      const bodySections: DocumentSection[] = [];
+      const generatedTocItems: string[] = [];
+
+      const cleanPdfWatermark = (txt: string) =>
+        txt
+          .replace(/\n\s*(?:[0-9ivxlc]+\s*\|\s*)?(?:[A-Za-z]\s+){5,}[A-Za-z][^\n]*(?=\n|$)/g, '\n')
+          .replace(/\n{3,}/g, '\n\n')
+          .trim();
+
+      for (let i = 0; i < keptMatches.length; i++) {
+        const current = keptMatches[i];
+        const nextIndex = i + 1 < keptMatches.length ? keptMatches[i + 1].index : normalized.length;
+        let chunk = cleanPdfWatermark(normalized.slice(current.index, nextIndex));
 
         let cleanTitle = current.title
           .replace(/^[#\s*]+/, '')
-          .replace(/-{3,}\s*\d+.*$/, '')
+          .replace(/\s*(?:-{2,}|\.{2,}|–{2,})\s*[0-9ivxlc]+\s*$/i, '')
           .trim();
 
-        if (cleanTitle.toUpperCase().startsWith('TABLE OF CONTENT')) {
-          cleanTitle = 'Table of Contents (Full Trainee Manual Index)';
+        if (current.kind === 'module') {
+          cleanTitle = cleanTitle.replace(/^MODULE\s+CODE\s+AND\s+TITLE:\s*/i, 'Module Overview: ');
+        } else if (current.kind === 'lo' && !/overview/i.test(cleanTitle)) {
+          cleanTitle = `${cleanTitle.replace(/\.+$/, '')} - Overview`;
+        } else if (current.kind === 'assessment') {
+          const numMatch = cleanTitle.match(/(\d+)/);
+          const loNum = numMatch ? numMatch[1] : '';
+          cleanTitle = loNum
+            ? `Learning Outcome ${loNum}: End Assessment & Review Questions`
+            : 'Learning Outcome: End Assessment & Review Questions';
         }
 
         const estPage = (i + 1) * 3;
-        tocItems.push(`${cleanTitle} ----------------------------------------------------------------------- ${estPage}`);
+        generatedTocItems.push(`${cleanTitle} ----------------------------------------------------------------------- ${estPage}`);
 
         let attachedImages: Array<{ url: string; alt: string; caption: string }> = [];
-        // Attach diagrams to indicative contents
-        if (i > 0 && (i % 3 === 1) && generatedImages.length > 0) {
-          const img = generatedImages[(Math.floor(i / 3)) % generatedImages.length];
+        if (current.kind === 'indicative' && generatedImages.length > 0 && (i % 3 === 0)) {
+          const img = generatedImages[Math.floor(i / 3) % generatedImages.length];
           attachedImages = [img];
-          chunk = `![${img.alt}](${img.url})\n\n` + chunk;
         }
 
-        if (i === 0) {
-          // Format Section 0 as Table of Contents
-          chunk = `# Table of Contents: ${docBaseName}\n\n` +
-            `> **Interactive Navigation:** Click any topic below to jump directly to that chapter in this manual.\n\n` +
-            tocItems.join('\n') + '\n\n' + chunk;
-        } else if (!chunk.startsWith('# ')) {
+        if (!chunk.startsWith('# ')) {
           chunk = `# ${cleanTitle}\n\n` + chunk;
         }
 
-        sections.push({
-          id: `sec_${Date.now()}_${i + 1}`,
+        bodySections.push({
+          id: `sec_${Date.now()}_${i + 2}`,
           title: cleanTitle,
           content: chunk,
-          pageNumber: i + 1,
+          pageNumber: i + 2,
           manualPage: String(estPage),
           images: attachedImages
         });
       }
 
-      // Re-inject full TOC list into Section 0
-      if (sections.length > 0) {
-        sections[0].content = `# Table of Contents: ${docBaseName}\n\n` +
+      const finalTocList = extractedTocLines.length >= 4 ? extractedTocLines : generatedTocItems;
+      const tocSection: DocumentSection = {
+        id: `sec_${Date.now()}_1`,
+        title: 'Table of Contents (Full Trainee Manual Index)',
+        content: `# Table of Contents: ${docBaseName}\n\n` +
           `> **Interactive Navigation:** Click any topic below to jump directly to that chapter in this manual.\n\n` +
-          tocItems.join('\n') + '\n\n' +
-          `Welcome to the official trainee manual for **${docBaseName}**. Select any chapter above to jump directly to that section.`;
-      }
+          finalTocList.join('\n') + '\n\n' +
+          `Welcome to the official trainee manual for **${docBaseName}**. Select any topic above to jump directly to its complete notes.`,
+        pageNumber: 1,
+        manualPage: '1',
+        images: []
+      };
 
       return {
-        sections,
+        sections: [tocSection, ...bodySections],
         images: generatedImages,
         hasDrawings: true
       };
@@ -799,7 +901,6 @@ function formatAndPartitionLikeWindowServer(
       if (generatedImages.length > 0 && i < generatedImages.length) {
         const img = generatedImages[i % generatedImages.length];
         attachedImages = [img];
-        chunk = `![${img.alt}](${img.url})\n\n` + chunk;
       }
 
       if (!chunk.startsWith('# ')) {
@@ -886,7 +987,7 @@ function formatAndPartitionLikeWindowServer(
     {
       id: `sec_${Date.now()}_3`,
       title: `Chapter 1: Overview & Theoretical Foundations`,
-      content: `${img1.url ? `![${img1.alt}](${img1.url})\n\n` : ''}# Chapter 1: Overview & Theoretical Foundations\n\n${part1}`,
+      content: `# Chapter 1: Overview & Theoretical Foundations\n\n${part1}`,
       pageNumber: 3,
       manualPage: '3',
       images: img1.url ? [img1] : []
@@ -894,7 +995,7 @@ function formatAndPartitionLikeWindowServer(
     {
       id: `sec_${Date.now()}_4`,
       title: `Chapter 2: Configuration, Labs & Command Syntax`,
-      content: `${img2.url ? `![${img2.alt}](${img2.url})\n\n` : ''}# Chapter 2: Configuration, Labs & Command Syntax\n\n${part2}`,
+      content: `# Chapter 2: Configuration, Labs & Command Syntax\n\n${part2}`,
       pageNumber: 4,
       manualPage: '12',
       images: img2.url ? [img2] : []
@@ -1185,6 +1286,59 @@ app.get('/api/categories', (req, res) => {
   res.json({ categories: CATEGORIES });
 });
 
+// Auto-repair any existing uploaded curriculum documents that previously split TOC dashed lines into broken stubs
+const verifiedCleanCurriculumDocs = new Set<string>();
+async function repairBrokenCurriculumDocuments(force = false) {
+  const allDocs = db.getDocuments() || [];
+  let repairedCount = 0;
+
+  for (const docItem of allDocs) {
+    if (!docItem?.id) continue;
+    if (!force && verifiedCleanCurriculumDocs.has(docItem.id)) continue;
+
+    const rawText = docItem.textContent || '';
+    const broken = hasBrokenCurriculumStubs(docItem.splitContent);
+    const missingSections = !Array.isArray(docItem.splitContent) || docItem.splitContent.length === 0;
+
+    if (!broken && !missingSections) {
+      verifiedCleanCurriculumDocs.add(docItem.id);
+      continue;
+    }
+
+    if (rawText.length < 1500) {
+      verifiedCleanCurriculumDocs.add(docItem.id);
+      continue;
+    }
+
+    try {
+      const isImg = ['png', 'jpg', 'jpeg', 'svg', 'webp', 'gif', 'bmp'].includes((docItem.type || '').toLowerCase());
+      const repaired = formatAndPartitionLikeWindowServer(
+        docItem.name,
+        rawText,
+        docItem.category || 'General',
+        isImg,
+        docItem.fileUrl
+      );
+      if (repaired.sections && repaired.sections.length > 0 && !hasBrokenCurriculumStubs(repaired.sections)) {
+        await db.updateDocument(docItem.id, {
+          splitContent: repaired.sections,
+          images: repaired.images,
+          hasDrawings: repaired.hasDrawings
+        });
+        verifiedCleanCurriculumDocs.add(docItem.id);
+        repairedCount++;
+        console.log(`[Curriculum Repair] Repaired ${docItem.id} (${docItem.name}): ${docItem.splitContent?.length || 0} -> ${repaired.sections.length} clean sections`);
+      }
+    } catch (repairErr) {
+      console.warn(`[Curriculum Repair] Notice for ${docItem.id}:`, repairErr);
+    }
+  }
+
+  if (repairedCount > 0) {
+    console.log(`[Curriculum Repair] Completed repairing ${repairedCount} curriculum manual(s).`);
+  }
+}
+
 // Document Management Routes
 app.get('/api/documents', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
@@ -1194,10 +1348,13 @@ app.get('/api/documents', async (req, res) => {
     console.warn('Document sync notice in /api/documents:', e);
   }
 
+  await repairBrokenCurriculumDocuments();
+
   let allDocs = db.getDocuments();
   if (!allDocs || allDocs.length === 0) {
     try {
       await syncFromFirestore();
+      await repairBrokenCurriculumDocuments(true);
       allDocs = db.getDocuments();
     } catch (e) {
       console.warn('Fallback document sync notice in /api/documents:', e);
@@ -1246,6 +1403,10 @@ app.get('/api/documents/:id', async (req, res) => {
     } catch (e) {
       console.warn('Document lookup sync notice:', e);
     }
+  }
+  if (doc && hasBrokenCurriculumStubs(doc.splitContent) && (doc.textContent || '').length >= 1500) {
+    await repairBrokenCurriculumDocuments(true);
+    doc = db.getDocumentById(req.params.id);
   }
   if (!doc) return res.status(404).json({ error: 'Document not found' });
   res.json({ document: doc });
@@ -1366,7 +1527,7 @@ app.post('/api/documents/process-uploaded', async (req, res) => {
             parsePromise.catch(() => {});
             const timeoutPromise = new Promise<{ text?: string }>((_, reject) => setTimeout(() => reject(new Error('PDF timeout')), 8000));
             const pdfData = await Promise.race([parsePromise, timeoutPromise]);
-            textContent = (pdfData?.text || '').trim().slice(0, 400000);
+            textContent = (pdfData?.text || '').trim().slice(0, 750000);
           } finally {
             try { await parser.destroy(); } catch (_) {}
           }
@@ -1390,7 +1551,7 @@ app.post('/api/documents/process-uploaded', async (req, res) => {
       type: filetype,
       size: size || (fileBuffer ? fileBuffer.length : 0),
       category: category || 'General',
-      textContent: textContent.slice(0, 400000),
+      textContent: textContent.slice(0, 750000),
       uploadedAt: new Date().toISOString(),
       userId,
       bookmarks: [],
@@ -1535,7 +1696,7 @@ app.post('/api/documents/upload-finalize', async (req, res) => {
             parsePromise.catch(() => {});
             const timeoutPromise = new Promise<{ text?: string }>((_, reject) => setTimeout(() => reject(new Error('PDF timeout')), 8000));
             const pdfData = await Promise.race([parsePromise, timeoutPromise]);
-            textContent = (pdfData?.text || '').trim().slice(0, 400000);
+            textContent = (pdfData?.text || '').trim().slice(0, 750000);
           } finally {
             try { await parser.destroy(); } catch {}
           }
@@ -1550,7 +1711,7 @@ app.post('/api/documents/upload-finalize', async (req, res) => {
       textContent = `Curriculum Study Module: ${topicName}\n\nChapter 1: Overview & Theoretical Foundations\nThis module covers core technical principles, architectures, and syllabus requirements for ${topicName} under ${effectiveCategory}.\n\nChapter 2: Configuration, Labs & Troubleshooting\nDetailed practical commands, verification steps, and exam revision guidelines for students.\n\nChapter 3: Certification Review & Self-Assessment\nKey review questions, industry best practices, and learning outcomes.`;
     }
 
-    textContent = textContent.slice(0, 400000);
+    textContent = textContent.slice(0, 750000);
     const effectiveFileUrl = `/api/documents/${docId}/file`;
     const compactImageUri = typeof thumbnailDataUri === 'string' && thumbnailDataUri.startsWith('data:') && thumbnailDataUri.length <= 260000
       ? thumbnailDataUri
