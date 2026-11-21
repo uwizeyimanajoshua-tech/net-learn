@@ -77,10 +77,16 @@
     <priority>0.80</priority>
   </url>
 
-  <!-- All 19 Technical Syllabi & Category Tracks -->
+  <!-- All 23 Technical Syllabi & Category Tracks -->
   <url>
     <loc>https://net-learn-psi.vercel.app/?category=Networking</loc>
-    <lastmod>2026-11-02</lastmod>
+    <lastmod>2026-11-21</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://net-learn-psi.vercel.app/?category=Wide%20Area%20Network</loc>
+    <lastmod>2026-11-21</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.85</priority>
   </url>
@@ -167,6 +173,12 @@
     <lastmod>2026-11-02</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.80</priority>
+  </url>
+  <url>
+    <loc>https://net-learn-psi.vercel.app/?category=Programming</loc>
+    <lastmod>2026-11-21</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
   </url>
   <url>
     <loc>https://net-learn-psi.vercel.app/?category=Zero%20Client%20with%20NComputing</loc>
