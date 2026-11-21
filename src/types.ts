@@ -140,6 +140,7 @@ export interface StudentProgress {
 
 export type CategoryName =
   | 'Networking'
+  | 'Wide Area Network'
   | 'Linux'
   | 'Window Server'
   | 'Windows Server'
@@ -169,6 +170,7 @@ export type CategoryName =
 
 export const CATEGORIES: CategoryName[] = [
   'Networking',
+  'Wide Area Network',
   'Linux',
   'Window Server',
   'Cyber Security',

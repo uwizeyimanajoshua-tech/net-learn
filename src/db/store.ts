@@ -71,6 +71,47 @@ function sanitizeForFirestore(obj: any): any {
   return result;
 }
 
+// Keep every Firestore document safely under Firestore's 1 MiB (1,048,576 bytes) ceiling
+function prepareDocumentForFirestore(docObj: any): Record<string, any> {
+  const clean: any = sanitizeForFirestore(docObj);
+  if (typeof clean.fileData === 'string' && clean.fileData.length > 260000) {
+    delete clean.fileData;
+  }
+  if (typeof clean.textContent === 'string' && clean.textContent.length > 200000) {
+    clean.textContent = clean.textContent.slice(0, 200000);
+  }
+  if (Array.isArray(clean.splitContent) && clean.splitContent.length > 30) {
+    clean.splitContent = clean.splitContent.slice(0, 30);
+  }
+
+  const MAX_BYTES = 820000;
+  let serializedLen = Buffer.byteLength(JSON.stringify(clean), 'utf8');
+  if (serializedLen > MAX_BYTES) {
+    delete clean.fileData;
+    serializedLen = Buffer.byteLength(JSON.stringify(clean), 'utf8');
+  }
+  if (serializedLen > MAX_BYTES && Array.isArray(clean.splitContent)) {
+    clean.splitContent = clean.splitContent.map((sec: any) => ({
+      ...sec,
+      content: typeof sec?.content === 'string' ? sec.content.slice(0, 8000) : '',
+      images: Array.isArray(sec?.images) ? sec.images.slice(0, 1) : undefined
+    }));
+    serializedLen = Buffer.byteLength(JSON.stringify(clean), 'utf8');
+  }
+  if (serializedLen > MAX_BYTES && typeof clean.textContent === 'string') {
+    clean.textContent = clean.textContent.slice(0, 60000);
+    serializedLen = Buffer.byteLength(JSON.stringify(clean), 'utf8');
+  }
+  if (serializedLen > MAX_BYTES && Array.isArray(clean.splitContent)) {
+    clean.splitContent = clean.splitContent.slice(0, 12).map((sec: any) => ({
+      ...sec,
+      content: typeof sec?.content === 'string' ? sec.content.slice(0, 3500) : '',
+      images: undefined
+    }));
+  }
+  return sanitizeForFirestore(clean);
+}
+
 import { neon } from '@neondatabase/serverless';
 
 // Initialize Neon Postgres client
@@ -436,9 +477,8 @@ export const db = {
   getDocuments: () => loadDB().documents,
   getDocumentById: (id: string) => loadDB().documents.find(d => d.id === id),
   createDocument: async (newDoc: Document) => {
-    // Sanitize document for local JSON store so fileData does not exceed 200KB
     const localDoc: Document = { ...newDoc };
-    if (localDoc.fileData && localDoc.fileData.length > 200000) {
+    if (localDoc.fileData && localDoc.fileData.length > 260000) {
       delete localDoc.fileData;
     }
 
@@ -448,14 +488,7 @@ export const db = {
 
     try {
       await runFirestore(async () => {
-        const firestoreDoc: any = sanitizeForFirestore(localDoc);
-        delete firestoreDoc.fileData; // Never write base64 fileData to Firestore to avoid 1MB limit
-        if (firestoreDoc.textContent && firestoreDoc.textContent.length > 200000) {
-          firestoreDoc.textContent = firestoreDoc.textContent.slice(0, 200000);
-        }
-        if (Array.isArray(firestoreDoc.splitContent) && firestoreDoc.splitContent.length > 30) {
-          firestoreDoc.splitContent = firestoreDoc.splitContent.slice(0, 30);
-        }
+        const firestoreDoc = prepareDocumentForFirestore(localDoc);
         await setDoc(doc(dbFirestore!, 'documents', newDoc.id), firestoreDoc);
         console.log(`Uploaded document ${newDoc.id} to Firestore.`);
       });
@@ -490,7 +523,7 @@ export const db = {
     const idx = data.documents.findIndex(d => d.id === id);
     if (idx !== -1) {
       const sanitizedUpdates = { ...updates };
-      if (sanitizedUpdates.fileData && sanitizedUpdates.fileData.length > 200000) {
+      if (sanitizedUpdates.fileData && sanitizedUpdates.fileData.length > 260000) {
         delete sanitizedUpdates.fileData;
       }
       data.documents[idx] = { ...data.documents[idx], ...sanitizedUpdates };
@@ -498,14 +531,7 @@ export const db = {
 
       try {
         await runFirestore(async () => {
-          const firestoreUpdates: any = sanitizeForFirestore(sanitizedUpdates);
-          delete firestoreUpdates.fileData;
-          if (firestoreUpdates.textContent && firestoreUpdates.textContent.length > 200000) {
-            firestoreUpdates.textContent = firestoreUpdates.textContent.slice(0, 200000);
-          }
-          if (Array.isArray(firestoreUpdates.splitContent) && firestoreUpdates.splitContent.length > 30) {
-            firestoreUpdates.splitContent = firestoreUpdates.splitContent.slice(0, 30);
-          }
+          const firestoreUpdates = prepareDocumentForFirestore(sanitizedUpdates);
           await setDoc(doc(dbFirestore!, 'documents', id), firestoreUpdates, { merge: true });
           console.log(`Updated document ${id} in Firestore.`);
         });
@@ -749,12 +775,12 @@ export const db = {
   updateProgress: (userId: string, updates: Partial<StudentProgress>) => {
     const data = loadDB();
     const idx = data.progress.findIndex(p => p.userId === userId);
+    let updated: StudentProgress;
     if (idx !== -1) {
-      data.progress[idx] = { ...data.progress[idx], ...updates, lastActive: new Date().toISOString() };
-      saveDB(data);
-      return data.progress[idx];
+      updated = { ...data.progress[idx], ...updates, lastActive: new Date().toISOString() };
+      data.progress[idx] = updated;
     } else {
-      const newPrg = {
+      updated = {
         userId,
         studiedModules: [],
         weakTopics: [],
@@ -764,10 +790,13 @@ export const db = {
         lastActive: new Date().toISOString(),
         ...updates
       };
-      data.progress.push(newPrg);
-      saveDB(data);
-      return newPrg;
+      data.progress.push(updated);
     }
+    saveDB(data);
+    runFirestore(async () => {
+      await setDoc(doc(dbFirestore!, 'progress', userId), sanitizeForFirestore(updated), { merge: true });
+    });
+    return updated;
   },
   incrementAiUsage: (userId: string) => {
     const data = loadDB();
@@ -775,6 +804,25 @@ export const db = {
     if (idx !== -1) {
       data.progress[idx].aiUsageCount = (data.progress[idx].aiUsageCount || 0) + 1;
       saveDB(data);
+      const nextCount = data.progress[idx].aiUsageCount;
+      runFirestore(async () => {
+        await setDoc(doc(dbFirestore!, 'progress', userId), { userId, aiUsageCount: nextCount, lastActive: new Date().toISOString() }, { merge: true });
+      });
+    } else {
+      const created: StudentProgress = {
+        userId,
+        studiedModules: [],
+        weakTopics: [],
+        strongTopics: [],
+        quizScores: [],
+        aiUsageCount: 1,
+        lastActive: new Date().toISOString()
+      };
+      data.progress.push(created);
+      saveDB(data);
+      runFirestore(async () => {
+        await setDoc(doc(dbFirestore!, 'progress', userId), sanitizeForFirestore(created), { merge: true });
+      });
     }
   },
 
@@ -959,14 +1007,7 @@ export async function syncFromFirestore() {
         const inFs = firestoreDocs.find(f => f.id === docItem.id);
         if (!inFs || (docItem.splitContent && (!inFs.splitContent || inFs.splitContent.length === 0))) {
           try {
-            const firestoreDoc: any = sanitizeForFirestore(docItem);
-            delete firestoreDoc.fileData;
-            if (firestoreDoc.textContent && firestoreDoc.textContent.length > 200000) {
-              firestoreDoc.textContent = firestoreDoc.textContent.slice(0, 200000);
-            }
-            if (Array.isArray(firestoreDoc.splitContent) && firestoreDoc.splitContent.length > 30) {
-              firestoreDoc.splitContent = firestoreDoc.splitContent.slice(0, 30);
-            }
+            const firestoreDoc = prepareDocumentForFirestore(docItem);
             await setDoc(doc(dbFirestore!, 'documents', docItem.id), firestoreDoc, { merge: true });
             console.log(`[Firestore] Seeded doc to Firestore: ${docItem.id} (${docItem.name})`);
           } catch (fsWriteErr: any) {
@@ -995,6 +1036,70 @@ export async function syncFromFirestore() {
     await activeFirestoreSync;
   } finally {
     activeFirestoreSync = null;
+  }
+}
+
+let lastAppCollectionsSyncAt = 0;
+let activeAppCollectionsSync: Promise<void> | null = null;
+
+export async function syncAppCollectionsIfStale(maxAgeMs = 15000): Promise<void> {
+  if (!firestoreEnabled || !dbFirestore) return;
+  if (Date.now() - lastAppCollectionsSyncAt < maxAgeMs) return;
+  if (activeAppCollectionsSync) {
+    await activeAppCollectionsSync;
+    return;
+  }
+  activeAppCollectionsSync = (async () => {
+    await runFirestore(async () => {
+      const [quizSnap, fcSnap, chatSnap, progSnap] = await Promise.all([
+        getDocs(collection(dbFirestore!, 'quizzes')),
+        getDocs(collection(dbFirestore!, 'flashcards')),
+        getDocs(collection(dbFirestore!, 'chats')),
+        getDocs(collection(dbFirestore!, 'progress'))
+      ]);
+
+      const localDB = loadDB();
+
+      const mergeById = <T extends { id: string }>(localArr: T[], snap: any): T[] => {
+        const map = new Map<string, T>();
+        for (const item of localArr || []) {
+          if (item?.id) map.set(item.id, item);
+        }
+        if (snap && !snap.empty) {
+          snap.forEach((docSnap: any) => {
+            const d = docSnap.data() as T;
+            if (d?.id) map.set(d.id, d);
+          });
+        }
+        return Array.from(map.values());
+      };
+
+      localDB.quizzes = mergeById(localDB.quizzes, quizSnap);
+      localDB.flashcards = mergeById(localDB.flashcards, fcSnap);
+      localDB.chats = mergeById(localDB.chats, chatSnap);
+
+      if (progSnap && !progSnap.empty) {
+        const progMap = new Map<string, StudentProgress>();
+        for (const p of localDB.progress || []) {
+          if (p?.userId) progMap.set(p.userId, p);
+        }
+        progSnap.forEach((docSnap: any) => {
+          const fp = docSnap.data() as StudentProgress;
+          const uid = fp?.userId || docSnap.id;
+          if (uid) progMap.set(uid, { ...fp, userId: uid });
+        });
+        localDB.progress = Array.from(progMap.values());
+      }
+
+      saveDB(localDB);
+      lastAppCollectionsSyncAt = Date.now();
+    }, 8000);
+  })();
+
+  try {
+    await activeAppCollectionsSync;
+  } finally {
+    activeAppCollectionsSync = null;
   }
 }
 

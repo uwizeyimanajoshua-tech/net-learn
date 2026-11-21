@@ -104,7 +104,7 @@ export default function CommunityForum({ darkMode, userId }: CommunityForumProps
   const [isPosting, setIsPosting] = useState(false);
   const [translatingId, setTranslatingId] = useState<string | null>(null);
 
-  const categories = ['All', 'Networking', 'Linux', 'Cyber Security', 'Programming', 'Databases', 'Cloud Computing'];
+  const categories = ['All', 'Networking', 'Wide Area Network', 'Linux', 'Cyber Security', 'Programming', 'Databases', 'Cloud Computing'];
 
   const handleUpvote = (id: string) => {
     setPosts(prev => prev.map(p => {

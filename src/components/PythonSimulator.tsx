@@ -322,7 +322,9 @@ export default function PythonSimulator({
         });
         if (res.ok) {
           const data = await res.json();
-          if (data && (data.stdout !== undefined || data.stderr !== undefined)) {
+          const stderrStr = String(data?.stderr || '');
+          const isMissingBinary = Boolean(data?.unavailable) || data?.exitCode === 127 || stderrStr.includes('python3: not found') || stderrStr.includes('ENOENT');
+          if (data && !isMissingBinary && (data.stdout !== undefined || data.stderr !== undefined)) {
             serverStdout = data.stdout || '';
             if (data.stderr) {
               serverStdout += (serverStdout ? '\n' : '') + data.stderr;

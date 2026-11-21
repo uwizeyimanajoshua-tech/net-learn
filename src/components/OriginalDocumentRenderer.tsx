@@ -25,6 +25,80 @@ interface OriginalDocumentRendererProps {
   onToggleSplitSide?: () => void;
 }
 
+const PdfPageCanvas: React.FC<{
+  pdfDoc: any;
+  pageNum: number;
+  zoom: number;
+  rotation: number;
+}> = ({ pdfDoc, pageNum, zoom, rotation }) => {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [rendered, setRendered] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let renderTask: any = null;
+    const canvas = canvasRef.current;
+    if (!canvas || !pdfDoc) return;
+
+    const doRender = async () => {
+      try {
+        const page = await pdfDoc.getPage(pageNum);
+        if (cancelled) return;
+        const context = canvas.getContext('2d');
+        if (!context) return;
+        const scale = (zoom / 100) * 1.4;
+        const viewport = page.getViewport({ scale, rotation });
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+        canvas.style.width = `${viewport.width / 1.4}px`;
+        canvas.style.height = `${viewport.height / 1.4}px`;
+        renderTask = page.render({ canvasContext: context, viewport });
+        await renderTask.promise;
+        if (!cancelled) setRendered(true);
+      } catch (err: any) {
+        if (err?.name !== 'RenderingCancelledException') {
+          console.warn(`PDF page ${pageNum} render notice:`, err);
+        }
+      }
+    };
+
+    if (pageNum <= 3 || typeof IntersectionObserver === 'undefined') {
+      doRender();
+    } else {
+      const observer = new IntersectionObserver(
+        (entries) => {
+          if (entries.some((e) => e.isIntersecting)) {
+            doRender();
+            observer.disconnect();
+          }
+        },
+        { rootMargin: '600px 0px' }
+      );
+      observer.observe(canvas);
+      return () => {
+        cancelled = true;
+        observer.disconnect();
+        if (renderTask) try { renderTask.cancel(); } catch {}
+      };
+    }
+
+    return () => {
+      cancelled = true;
+      if (renderTask) try { renderTask.cancel(); } catch {}
+    };
+  }, [pdfDoc, pageNum, zoom, rotation]);
+
+  return (
+    <div className="flex flex-col items-center gap-1.5 w-full">
+      <div className="text-[10px] font-mono text-gray-400 font-semibold">Page {pageNum}</div>
+      <canvas
+        ref={canvasRef}
+        className={`max-w-full rounded-xl shadow-xl bg-white transition-opacity duration-200 ${rendered ? 'opacity-100' : 'opacity-60 min-h-[420px]'}`}
+      />
+    </div>
+  );
+}
+
 export default function OriginalDocumentRenderer({
   document: doc,
   darkMode = true,
@@ -45,7 +119,7 @@ export default function OriginalDocumentRenderer({
   const [activeViewTab, setActiveViewTab] = useState<'document' | 'drawings'>('document');
   const [paperTheme, setPaperTheme] = useState<'paper' | 'dark' | 'sepia' | 'blueprint'>('paper');
   const [fontFamily, setFontFamily] = useState<'sans' | 'serif' | 'mono'>('sans');
-  const [readingLayout, setReadingLayout] = useState<'paginated' | 'scroll'>('paginated');
+  const [readingLayout, setReadingLayout] = useState<'paginated' | 'scroll'>('scroll');
   const [showToc, setShowToc] = useState<boolean>(false);
   const [copiedBlockId, setCopiedBlockId] = useState<string | null>(null);
   const [fontSize, setFontSize] = useState<number>(14);
@@ -61,7 +135,7 @@ export default function OriginalDocumentRenderer({
   const [pdfCurrentPage, setPdfCurrentPage] = useState<number>(1);
   const [pdfLoading, setPdfLoading] = useState<boolean>(false);
   const [pdfRenderError, setPdfRenderError] = useState<string | null>(null);
-  const [pdfViewMode, setPdfViewMode] = useState<'single' | 'continuous'>('single');
+  const [pdfViewMode, setPdfViewMode] = useState<'single' | 'continuous'>('continuous');
 
   const pdfCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const renderTaskRef = useRef<any>(null);
@@ -589,12 +663,12 @@ export default function OriginalDocumentRenderer({
   };
 
   return (
-    <div className={`flex flex-col overflow-hidden transition-all duration-300 ${
+    <div className={`flex flex-col transition-all duration-300 ${
       isTrueFullscreen 
-        ? 'fixed inset-0 z-50 w-screen h-screen rounded-none border-0 bg-[#070e17]'
+        ? 'fixed inset-0 z-50 w-screen h-screen overflow-hidden rounded-none border-0 bg-[#070e17]'
         : layoutMode === 'full' 
-          ? 'w-full min-h-[820px] h-[calc(100vh-120px)] rounded-3xl border shadow-2xl' 
-          : 'w-full min-h-[640px] h-full rounded-3xl border shadow-xl'
+          ? 'w-full min-h-[820px] overflow-x-clip rounded-3xl border shadow-2xl' 
+          : 'w-full min-h-[640px] overflow-x-clip rounded-3xl border shadow-xl'
     } ${
       darkMode ? 'bg-[#0b131e] border-white/10 text-gray-100' : 'bg-gray-100 border-gray-300 text-gray-900'
     }`}>
@@ -1014,7 +1088,9 @@ export default function OriginalDocumentRenderer({
       {/* 4. MAIN DOCUMENT RENDERING CANVAS AREA */}
       <div 
         ref={containerRef}
-        className="flex-1 bg-black/95 relative overflow-auto p-4 sm:p-8 flex items-start justify-center min-h-[480px] scrollbar-thin"
+        className={`flex-1 bg-black/95 relative p-4 sm:p-8 flex items-start justify-center min-h-[480px] scrollbar-thin ${
+          isTrueFullscreen ? 'overflow-y-auto overflow-x-auto' : 'overflow-x-auto'
+        }`}
       >
         {/* CAD Blueprint Grid Overlay if enabled */}
         {showGrid && (
@@ -1033,24 +1109,61 @@ export default function OriginalDocumentRenderer({
             
             {/* SUB-CASE A: PDF RENDERED VIA PDF.JS CANVAS */}
             {isPdf && !pdfRenderError ? (
-              <div 
-                style={{ 
-                  transform: `scale(${zoom / 100}) rotate(${rotation}deg)`,
-                  transformOrigin: 'top center',
-                  transition: 'transform 0.15s ease-out'
-                }}
-                className="flex flex-col items-center justify-center relative shadow-2xl rounded-2xl overflow-hidden bg-white p-2"
-              >
-                {pdfLoading && (
-                  <div className="py-24 px-16 text-center space-y-3">
-                    <div className="w-8 h-8 rounded-full border-2 border-brand-primary border-t-transparent animate-spin mx-auto" />
-                    <p className="text-xs text-gray-600 font-mono">Rendering PDF pages with vector clarity...</p>
+              <div className="w-full flex flex-col items-center gap-4">
+                {pdfNumPages > 0 && (
+                  <div className="flex flex-wrap items-center justify-center gap-3 px-4 py-2 rounded-xl bg-slate-900/90 border border-white/10 text-xs text-gray-200 font-mono">
+                    <div className="flex bg-black/40 rounded-lg p-0.5 border border-white/10 text-[10px]">
+                      <button
+                        onClick={() => setPdfViewMode('continuous')}
+                        className={`px-2.5 py-1 rounded cursor-pointer ${
+                          pdfViewMode === 'continuous' ? 'bg-brand-primary text-white font-bold' : 'text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        Continuous Scroll ({pdfNumPages}p)
+                      </button>
+                      <button
+                        onClick={() => setPdfViewMode('single')}
+                        className={`px-2.5 py-1 rounded cursor-pointer ${
+                          pdfViewMode === 'single' ? 'bg-brand-primary text-white font-bold' : 'text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        Single Page
+                      </button>
+                    </div>
+                    {pdfViewMode === 'single' && (
+                      <div className="flex items-center gap-2">
+                        <button onClick={handlePrevPage} disabled={pdfCurrentPage <= 1} className="px-2 py-1 rounded bg-white/10 disabled:opacity-30 cursor-pointer">&larr;</button>
+                        <span>Page {pdfCurrentPage} / {pdfNumPages}</span>
+                        <button onClick={handleNextPage} disabled={pdfCurrentPage >= pdfNumPages} className="px-2 py-1 rounded bg-white/10 disabled:opacity-30 cursor-pointer">&rarr;</button>
+                      </div>
+                    )}
                   </div>
                 )}
-                <canvas 
-                  ref={pdfCanvasRef} 
-                  className={`max-w-full rounded-xl shadow-xl transition-opacity duration-200 ${pdfLoading ? 'opacity-0' : 'opacity-100'}`}
-                />
+                <div 
+                  style={{ 
+                    transform: pdfViewMode === 'single' ? `scale(${zoom / 100}) rotate(${rotation}deg)` : undefined,
+                    transformOrigin: 'top center',
+                    transition: 'transform 0.15s ease-out'
+                  }}
+                  className="flex flex-col items-center justify-center relative shadow-2xl rounded-2xl overflow-hidden bg-slate-900/40 p-3 gap-6 w-full max-w-4xl"
+                >
+                  {pdfLoading && (
+                    <div className="py-24 px-16 text-center space-y-3">
+                      <div className="w-8 h-8 rounded-full border-2 border-brand-primary border-t-transparent animate-spin mx-auto" />
+                      <p className="text-xs text-gray-400 font-mono">Rendering PDF pages with vector clarity...</p>
+                    </div>
+                  )}
+                  {!pdfLoading && pdfViewMode === 'continuous' && pdfDoc ? (
+                    Array.from({ length: Math.min(pdfNumPages, 80) }, (_, i) => i + 1).map((pageNum) => (
+                      <PdfPageCanvas key={pageNum} pdfDoc={pdfDoc} pageNum={pageNum} zoom={zoom} rotation={rotation} />
+                    ))
+                  ) : (
+                    <canvas 
+                      ref={pdfCanvasRef} 
+                      className={`max-w-full rounded-xl shadow-xl bg-white transition-opacity duration-200 ${pdfLoading ? 'opacity-0' : 'opacity-100'}`}
+                    />
+                  )}
+                </div>
               </div>
             ) : isImage && (doc.fileData || fileUrl) ? (
               /* SUB-CASE B: GRAPHIC / IMAGE / BLUEPRINT (PNG, JPG, SVG, WEBP) */

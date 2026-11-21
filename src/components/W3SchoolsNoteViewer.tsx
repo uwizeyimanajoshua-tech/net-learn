@@ -96,7 +96,12 @@ export default function W3SchoolsNoteViewer({
   }, [rawSections, doc]);
 
   const [activeSectionIndex, setActiveSectionIndex] = useState<number>(0);
+  const [viewMode, setViewMode] = useState<'all' | 'single'>('all');
   const activeSection = sections[activeSectionIndex] || sections[0];
+
+  useEffect(() => {
+    setActiveSectionIndex(0);
+  }, [doc.id]);
 
   // Completed chapters tracking (saved in localStorage for learner persistence)
   const [completedSections, setCompletedSections] = useState<string[]>(() => {
@@ -125,20 +130,34 @@ export default function W3SchoolsNoteViewer({
     return sections.filter(s => s.title.toLowerCase().includes(q) || s.content.toLowerCase().includes(q));
   }, [sections, searchQuery]);
 
+  const scrollToSection = (idx: number) => {
+    const safeIdx = Math.max(0, Math.min(sections.length - 1, idx));
+    setActiveSectionIndex(safeIdx);
+    stopSpeech();
+    if (viewMode === 'all') {
+      setTimeout(() => {
+        const el = document.getElementById(`w3-section-${safeIdx}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } else {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      }, 60);
+    } else {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
   // Navigation handlers
   const handlePrevSection = () => {
     if (activeSectionIndex > 0) {
-      setActiveSectionIndex(prev => prev - 1);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      stopSpeech();
+      scrollToSection(activeSectionIndex - 1);
     }
   };
 
   const handleNextSection = () => {
     if (activeSectionIndex < sections.length - 1) {
-      setActiveSectionIndex(prev => prev + 1);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      stopSpeech();
+      scrollToSection(activeSectionIndex + 1);
     }
   };
 
@@ -242,8 +261,14 @@ export default function W3SchoolsNoteViewer({
     if (matchedIndex !== -1) {
       setActiveSectionIndex(matchedIndex);
       setTocDrawerOpen(false);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
       stopSpeech();
+      if (viewMode === 'all') {
+        setTimeout(() => {
+          document.getElementById(`w3-section-${matchedIndex}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 80);
+      } else {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
 
       setJumpToast({
         message: `Navigated to: ${title}`,
@@ -696,7 +721,7 @@ export default function W3SchoolsNoteViewer({
    * 4. Zebra-striped reference tables
    * 5. Clean lists & bold definitions
    */
-  const renderW3SchoolsContent = (rawText: string) => {
+  const renderW3SchoolsContent = (rawText: string, sectionKey?: string) => {
     if (!rawText) return null;
 
     // Normalize Windows line endings and double line spacing
@@ -724,7 +749,7 @@ export default function W3SchoolsNoteViewer({
               }
             }
 
-            const blockId = `code_block_${activeSection.id}_${partIdx}`;
+            const blockId = `code_block_${sectionKey || activeSection.id}_${partIdx}`;
             const trimmedCode = codeContent.trim();
             const runnerState = inlineRunners[blockId];
 
@@ -1424,7 +1449,23 @@ export default function W3SchoolsNoteViewer({
         </div>
 
         {/* Right: Accessibility Controls & TOC Drawer Button */}
-        <div className="flex items-center gap-2 sm:gap-2.5">
+        <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap">
+          {/* Continuous All-Sections Scroll vs Single-Topic Mode Toggle */}
+          {sections.length > 1 && (
+            <button
+              onClick={() => setViewMode(prev => (prev === 'all' ? 'single' : 'all'))}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 shadow-xs ${
+                viewMode === 'all'
+                  ? 'bg-[#04aa6d] text-white border-[#04aa6d]'
+                  : 'bg-[#04aa6d]/10 text-[#04aa6d] border-[#04aa6d]/30 hover:bg-[#04aa6d] hover:text-white'
+              }`}
+              title={viewMode === 'all' ? 'Showing full document for continuous scrolling' : 'Showing one topic at a time'}
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">{viewMode === 'all' ? 'Full Scroll' : 'Single Topic'}</span>
+            </button>
+          )}
+
           {/* Table of Contents Quick Jump Drawer Button */}
           <button
             onClick={() => setTocDrawerOpen(true)}
@@ -1607,9 +1648,7 @@ export default function W3SchoolsNoteViewer({
                     key={sec.id}
                     onClick={() => {
                       const realIdx = sections.findIndex(s => s.id === sec.id);
-                      setActiveSectionIndex(realIdx);
-                      window.scrollTo({ top: 0, behavior: 'smooth' });
-                      stopSpeech();
+                      scrollToSection(realIdx);
                     }}
                     className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all flex items-center justify-between gap-2 cursor-pointer ${
                       isSelected
@@ -1669,21 +1708,25 @@ export default function W3SchoolsNoteViewer({
               {/* Middle Section Indicator & TOC Navigation */}
               <div className="flex items-center gap-2.5 text-center">
                 <span className="text-[11px] font-mono font-bold uppercase text-gray-400 hidden sm:inline">
-                  Topic {activeSectionIndex + 1} of {sections.length}
+                  {viewMode === 'all' ? `Full Document (${sections.length} Topics)` : `Topic ${activeSectionIndex + 1} of ${sections.length}`}
                 </span>
                 {activeSectionIndex !== 0 && (
                   <button
-                    onClick={() => {
-                      setActiveSectionIndex(0);
-                      window.scrollTo({ top: 0, behavior: 'smooth' });
-                    }}
+                    onClick={() => scrollToSection(0)}
                     className="px-2.5 py-1 rounded-md text-[11px] font-bold text-[#04aa6d] bg-[#04aa6d]/10 hover:bg-[#04aa6d] hover:text-white transition-all cursor-pointer flex items-center gap-1 shadow-xs"
-                    title="Jump to Table of Contents"
+                    title="Jump to top of document"
                   >
                     <BookOpen className="w-3 h-3" />
-                    <span>Table of Contents</span>
+                    <span>Top</span>
                   </button>
                 )}
+                <button
+                  onClick={() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' })}
+                  className="px-2.5 py-1 rounded-md text-[11px] font-bold text-gray-500 hover:text-[#04aa6d] bg-gray-400/10 transition-all cursor-pointer flex items-center gap-1"
+                  title="Scroll to bottom of document"
+                >
+                  <span>Bottom &darr;</span>
+                </button>
               </div>
 
               <button
@@ -1698,37 +1741,6 @@ export default function W3SchoolsNoteViewer({
               >
                 Next &raquo;
               </button>
-            </div>
-
-            {/* CHAPTER TITLE & LEARNING OBJECTIVE */}
-            <div className="space-y-3 mb-8 text-left">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="px-3 py-1 rounded-md text-[10px] font-mono font-bold uppercase bg-[#04aa6d]/15 text-[#04aa6d] border border-[#04aa6d]/30">
-                  {doc.category || 'Tutorial'} Chapter {activeSectionIndex + 1}
-                </span>
-                {activeSection.learningOutcome && (
-                  <span className="px-3 py-1 rounded-md text-[10px] font-mono font-bold bg-indigo-500/15 text-indigo-400 border border-indigo-500/30">
-                    Target: {activeSection.learningOutcome}
-                  </span>
-                )}
-                <button
-                  onClick={() => toggleSectionCompletion(activeSection.id)}
-                  className={`ml-auto px-3 py-1 rounded-lg text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
-                    completedSections.includes(activeSection.id)
-                      ? 'bg-[#04aa6d] border-[#04aa6d] text-white'
-                      : 'border-gray-400/20 hover:bg-[#04aa6d]/10 text-gray-400 hover:text-[#04aa6d]'
-                  }`}
-                >
-                  <Check className="w-3.5 h-3.5" />
-                  <span>{completedSections.includes(activeSection.id) ? 'Completed' : 'Mark Completed'}</span>
-                </button>
-              </div>
-
-              <h1 
-                className={`font-display font-extrabold text-2xl sm:text-3xl lg:text-4xl tracking-tight leading-snug ${themeClasses.heading}`}
-              >
-                {activeSection.title}
-              </h1>
             </div>
 
             {/* DOCUMENT-LEVEL PHOTOGRAPH / BLUEPRINT HERO CARD (If file is an image) */}
@@ -1792,65 +1804,110 @@ export default function W3SchoolsNoteViewer({
               </div>
             )}
 
-            {/* SECTION ATTACHED FIGURES & DIAGRAMS */}
-            {activeSection.images && activeSection.images.length > 0 && (
-              <div className="my-6 space-y-4">
-                {activeSection.images.map((secImg, sImgIdx) => (
-                  <figure
-                    key={sImgIdx}
-                    className={`rounded-2xl overflow-hidden border shadow-lg transition-all ${
-                      themeClasses.border
-                    } ${
-                      theme === 'w3-light' ? 'bg-[#f8fafc] border-gray-200' : 'bg-slate-900/60 border-slate-800'
-                    }`}
+            {/* RENDER ALL SECTIONS (CONTINUOUS SCROLL) OR SINGLE ACTIVE SECTION */}
+            <div className="space-y-12">
+              {(viewMode === 'all' ? sections : [activeSection]).map((sec, renderIdx) => {
+                const secIdx = viewMode === 'all' ? renderIdx : activeSectionIndex;
+                return (
+                  <section
+                    key={sec.id || secIdx}
+                    id={`w3-section-${secIdx}`}
+                    className="scroll-mt-24 pb-10 border-b border-gray-400/20 last:border-b-0 last:pb-0"
                   >
-                    <div className="relative group p-4 sm:p-6 flex flex-col items-center justify-center bg-black/5 dark:bg-black/50">
-                      <img
-                        src={secImg.url}
-                        alt={secImg.alt || secImg.caption || 'Topic Diagram'}
-                        className="max-h-[520px] w-auto max-w-full rounded-xl object-contain shadow-md cursor-pointer hover:scale-[1.01] transition-transform duration-200 select-none"
-                        onClick={() => {
-                          setLightboxImage({ url: secImg.url, caption: secImg.caption || secImg.alt || 'Topic Diagram', alt: secImg.alt });
-                          setLightboxZoom(100);
-                          setLightboxRotation(0);
-                        }}
-                        loading="lazy"
-                      />
-                      <div className="absolute top-3 right-3 flex items-center gap-1.5 opacity-90 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                    {/* CHAPTER TITLE & LEARNING OBJECTIVE */}
+                    <div className="space-y-3 mb-8 text-left">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="px-3 py-1 rounded-md text-[10px] font-mono font-bold uppercase bg-[#04aa6d]/15 text-[#04aa6d] border border-[#04aa6d]/30">
+                          {doc.category || 'Tutorial'} Chapter {secIdx + 1}
+                        </span>
+                        {sec.learningOutcome && (
+                          <span className="px-3 py-1 rounded-md text-[10px] font-mono font-bold bg-indigo-500/15 text-indigo-400 border border-indigo-500/30">
+                            Target: {sec.learningOutcome}
+                          </span>
+                        )}
                         <button
-                          onClick={() => {
-                            setLightboxImage({ url: secImg.url, caption: secImg.caption || secImg.alt || 'Topic Diagram', alt: secImg.alt });
-                            setLightboxZoom(100);
-                            setLightboxRotation(0);
-                          }}
-                          className="px-3 py-1.5 rounded-xl bg-black/80 hover:bg-black text-white text-xs font-semibold backdrop-blur-md shadow-md flex items-center gap-1.5 cursor-pointer border border-white/20 active:scale-95 transition-all"
+                          onClick={() => toggleSectionCompletion(sec.id)}
+                          className={`ml-auto px-3 py-1 rounded-lg text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
+                            completedSections.includes(sec.id)
+                              ? 'bg-[#04aa6d] border-[#04aa6d] text-white'
+                              : 'border-gray-400/20 hover:bg-[#04aa6d]/10 text-gray-400 hover:text-[#04aa6d]'
+                          }`}
                         >
-                          <Maximize2 className="w-3.5 h-3.5 text-[#04aa6d]" />
-                          <span>Inspect Photo</span>
+                          <Check className="w-3.5 h-3.5" />
+                          <span>{completedSections.includes(sec.id) ? 'Completed' : 'Mark Completed'}</span>
                         </button>
                       </div>
-                    </div>
-                    {secImg.caption && (
-                      <figcaption className={`px-4 py-2.5 text-center text-xs font-medium border-t flex items-center justify-center gap-2 ${
-                        themeClasses.border
-                      } ${
-                        theme === 'w3-light' ? 'bg-white text-gray-700' : 'bg-slate-950 text-gray-300'
-                      }`}>
-                        <span className="font-extrabold text-[#04aa6d] uppercase tracking-wider text-[11px]">Figure:</span>
-                        <span>{secImg.caption}</span>
-                      </figcaption>
-                    )}
-                  </figure>
-                ))}
-              </div>
-            )}
 
-            {/* CHAPTER BODY: PARSED W3SCHOOLS RICH FORMATTING */}
-            <div className={`space-y-6 ${readingWidth === 'comfortable' ? 'max-w-4xl' : 'max-w-full'}`}>
-              {renderW3SchoolsContent(activeSection.content)}
+                      <h1
+                        className={`font-display font-extrabold text-2xl sm:text-3xl lg:text-4xl tracking-tight leading-snug ${themeClasses.heading}`}
+                      >
+                        {sec.title}
+                      </h1>
+                    </div>
+
+                    {/* SECTION ATTACHED FIGURES & DIAGRAMS */}
+                    {sec.images && sec.images.length > 0 && (
+                      <div className="my-6 space-y-4">
+                        {sec.images.map((secImg, sImgIdx) => (
+                          <figure
+                            key={sImgIdx}
+                            className={`rounded-2xl overflow-hidden border shadow-lg transition-all ${
+                              themeClasses.border
+                            } ${
+                              theme === 'w3-light' ? 'bg-[#f8fafc] border-gray-200' : 'bg-slate-900/60 border-slate-800'
+                            }`}
+                          >
+                            <div className="relative group p-4 sm:p-6 flex flex-col items-center justify-center bg-black/5 dark:bg-black/50">
+                              <img
+                                src={secImg.url}
+                                alt={secImg.alt || secImg.caption || 'Topic Diagram'}
+                                className="max-h-[520px] w-auto max-w-full rounded-xl object-contain shadow-md cursor-pointer hover:scale-[1.01] transition-transform duration-200 select-none"
+                                onClick={() => {
+                                  setLightboxImage({ url: secImg.url, caption: secImg.caption || secImg.alt || 'Topic Diagram', alt: secImg.alt });
+                                  setLightboxZoom(100);
+                                  setLightboxRotation(0);
+                                }}
+                                loading="lazy"
+                              />
+                              <div className="absolute top-3 right-3 flex items-center gap-1.5 opacity-90 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button
+                                  onClick={() => {
+                                    setLightboxImage({ url: secImg.url, caption: secImg.caption || secImg.alt || 'Topic Diagram', alt: secImg.alt });
+                                    setLightboxZoom(100);
+                                    setLightboxRotation(0);
+                                  }}
+                                  className="px-3 py-1.5 rounded-xl bg-black/80 hover:bg-black text-white text-xs font-semibold backdrop-blur-md shadow-md flex items-center gap-1.5 cursor-pointer border border-white/20 active:scale-95 transition-all"
+                                >
+                                  <Maximize2 className="w-3.5 h-3.5 text-[#04aa6d]" />
+                                  <span>Inspect Photo</span>
+                                </button>
+                              </div>
+                            </div>
+                            {secImg.caption && (
+                              <figcaption className={`px-4 py-2.5 text-center text-xs font-medium border-t flex items-center justify-center gap-2 ${
+                                themeClasses.border
+                              } ${
+                                theme === 'w3-light' ? 'bg-white text-gray-700' : 'bg-slate-950 text-gray-300'
+                              }`}>
+                                <span className="font-extrabold text-[#04aa6d] uppercase tracking-wider text-[11px]">Figure:</span>
+                                <span>{secImg.caption}</span>
+                              </figcaption>
+                            )}
+                          </figure>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* CHAPTER BODY: PARSED W3SCHOOLS RICH FORMATTING */}
+                    <div className={`space-y-6 ${readingWidth === 'comfortable' ? 'max-w-4xl' : 'max-w-full'}`}>
+                      {renderW3SchoolsContent(sec.content, sec.id || String(secIdx))}
+                    </div>
+                  </section>
+                );
+              })}
             </div>
 
-            {/* W3SCHOOLS BOTTOM NAVIGATION (< Previous / Next >) */}
+            {/* W3SCHOOLS BOTTOM NAVIGATION (< Previous / Top / Next >) */}
             <div className="flex items-center justify-between border-t border-gray-400/15 pt-6 mt-12">
               <button
                 onClick={handlePrevSection}
@@ -1865,19 +1922,16 @@ export default function W3SchoolsNoteViewer({
                 &larr; Previous
               </button>
 
-              {/* Back to Table of Contents button in bottom nav */}
-              {activeSectionIndex !== 0 && (
-                <button
-                  onClick={() => {
-                    setActiveSectionIndex(0);
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                  }}
-                  className="px-4 py-2 rounded-xl text-xs font-bold border border-gray-400/20 hover:bg-[#04aa6d]/10 text-gray-500 hover:text-[#04aa6d] transition-all cursor-pointer flex items-center gap-1.5"
-                >
-                  <BookOpen className="w-3.5 h-3.5 text-[#04aa6d]" />
-                  <span>Table of Contents</span>
-                </button>
-              )}
+              <button
+                onClick={() => {
+                  setActiveSectionIndex(0);
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-bold border border-gray-400/20 hover:bg-[#04aa6d]/10 text-gray-500 hover:text-[#04aa6d] transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <BookOpen className="w-3.5 h-3.5 text-[#04aa6d]" />
+                <span>Back to Top &uarr;</span>
+              </button>
 
               <button
                 onClick={handleNextSection}
@@ -1967,12 +2021,10 @@ export default function W3SchoolsNoteViewer({
                       key={sec.id}
                       onClick={() => {
                         const actualIdx = sections.findIndex(s => s.id === sec.id);
-                        if (actualIdx !== -1) {
-                          setActiveSectionIndex(actualIdx);
-                        }
                         setTocDrawerOpen(false);
-                        window.scrollTo({ top: 0, behavior: 'smooth' });
-                        stopSpeech();
+                        if (actualIdx !== -1) {
+                          scrollToSection(actualIdx);
+                        }
                         setJumpToast({
                           message: `Navigated to: ${sec.title}`,
                           visible: true
@@ -2275,8 +2327,8 @@ export default function W3SchoolsNoteViewer({
                           onClick={(e) => {
                             e.stopPropagation();
                             if (img.sectionIndex !== undefined) {
-                              setActiveSectionIndex(img.sectionIndex);
                               setShowFiguresDrawer(false);
+                              scrollToSection(img.sectionIndex);
                             }
                           }}
                           className="px-2 py-1 rounded bg-[#04aa6d]/15 text-[#04aa6d] hover:bg-[#04aa6d] hover:text-white transition-colors text-[10px] font-bold shrink-0"

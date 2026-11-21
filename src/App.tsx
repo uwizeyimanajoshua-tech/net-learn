@@ -150,7 +150,7 @@ export default function App() {
         },
         documents: {
           title: 'Technical Curriculum & Notes Library | NET LEARN',
-          desc: 'Browse 19 technical domains, W3Schools-styled chapter notes, executable code tutorials, and practice exercises.'
+          desc: `Browse ${CATEGORIES.length} technical domains, W3Schools-styled chapter notes, executable code tutorials, and practice exercises.`
         },
         exams: {
           title: 'Technical Practice Exams & Certification Simulator | NET LEARN',
@@ -575,6 +575,7 @@ export default function App() {
           { name: 'DATABASE', category: 'Database', docId: 'db_1' },
           { name: 'LINUX', category: 'Linux', docId: 'lin_1', action: () => handleNavigateToSection('linux_sim') },
           { name: 'NETWORKING', category: 'Networking', docId: 'net_1' },
+          { name: 'WIDE AREA NETWORK', category: 'Wide Area Network', docId: 'wan_1' },
           { name: 'CYBER SECURITY', category: 'Cyber Security', docId: 'sec_1' },
           { name: 'WINDOW SERVER', category: 'Window Server', docId: 'win_1' },
           { name: 'CLOUD COMPUTING', category: 'Cloud Computing', docId: 'cloud_1' },
@@ -682,7 +683,7 @@ export default function App() {
       )}
 
       {/* 6. COMPREHENSIVE SPLIT-VIEW (Sidebar + Content Workspace) */}
-      <div className="flex-1 flex items-stretch w-full overflow-hidden relative">
+      <div className="flex-1 flex items-stretch w-full overflow-x-clip relative">
         
         {/* 6A. COLLAPSIBLE LEFT SIDEBAR (The 10 key categories + Syllabus domains) */}
         <aside className={`shrink-0 transition-all duration-300 border-r text-left overflow-y-auto relative z-30 ${
@@ -750,7 +751,7 @@ export default function App() {
         </aside>
 
         {/* 6B. MAIN WORKSPACE / CONTENT COLUMN */}
-        <main className={`flex-1 overflow-y-auto relative w-full ${
+        <main className={`flex-1 relative w-full min-w-0 ${
           (activeTab === 'documents' && isReadingDocument)
             ? 'max-w-full p-2 sm:p-4 lg:p-6'
             : 'max-w-7xl mx-auto p-5 sm:p-8'

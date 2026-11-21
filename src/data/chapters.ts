@@ -4,6 +4,7 @@ export const DEFAULT_CHAPTERS: Record<string, Array<{ id: string; name: string; 
 
 export const SIDEBAR_CATEGORIES = [
   'Networking',
+  'Wide Area Network',
   'Linux',
   'Window Server',
   'Cyber Security',

@@ -479,7 +479,7 @@ export default function VideoLectures({ darkMode = false, onNavigateToTab, user 
     return matchesCategory && matchesSearch;
   });
 
-  const categories = ['All', 'Networking', 'Linux', 'Window Server', 'Cyber Security', 'Programming', 'Fiber Optics'];
+  const categories = ['All', 'Networking', 'Wide Area Network', 'Linux', 'Window Server', 'Cyber Security', 'Programming', 'Fiber Optics'];
 
   return (
     <div className="space-y-6 animate-fade-in text-left pb-16">

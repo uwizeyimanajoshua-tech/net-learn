@@ -7,6 +7,93 @@ import OriginalDocumentRenderer from './OriginalDocumentRenderer.js';
 import W3SchoolsNoteViewer from './W3SchoolsNoteViewer.js';
 import { doc as fsDoc, getDoc } from 'firebase/firestore';
 import { db as firestoreDb, handleFirestoreError, OperationType } from '../firebase.js';
+import * as pdfjsLib from 'pdfjs-dist';
+
+if (typeof window !== 'undefined' && pdfjsLib.GlobalWorkerOptions) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+}
+
+async function extractTextInBrowserForLargeFile(file: File): Promise<string> {
+  const nameLower = file.name.toLowerCase();
+  try {
+    if (nameLower.endsWith('.txt') || nameLower.endsWith('.md') || nameLower.endsWith('.csv') || nameLower.endsWith('.json') || file.type.startsWith('text/')) {
+      const txt = await file.slice(0, 600 * 1024).text();
+      return txt.slice(0, 320000);
+    }
+    if (nameLower.endsWith('.pdf') || file.type === 'application/pdf') {
+      const buf = await file.arrayBuffer();
+      const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buf) });
+      const pdf = await loadingTask.promise;
+      const maxPages = Math.min(pdf.numPages, 150);
+      let combined = '';
+      for (let p = 1; p <= maxPages; p++) {
+        const page = await pdf.getPage(p);
+        const content = await page.getTextContent();
+        const pageLines: string[] = [];
+        let lastY: number | null = null;
+        for (const item of content.items as any[]) {
+          const str = item.str || '';
+          if (!str) continue;
+          const y = Array.isArray(item.transform) ? item.transform[5] : null;
+          if (lastY !== null && y !== null && Math.abs(y - lastY) > 4) {
+            pageLines.push('\n' + str);
+          } else {
+            pageLines.push((pageLines.length > 0 ? ' ' : '') + str);
+          }
+          lastY = y;
+        }
+        const pageText = pageLines.join('').replace(/[ \t]{2,}/g, ' ').trim();
+        if (pageText) {
+          combined += (combined ? '\n\n' : '') + pageText;
+        }
+        if (combined.length >= 320000) break;
+      }
+      return combined.slice(0, 320000);
+    }
+  } catch (err) {
+    console.warn('Browser-side file extraction notice:', err);
+  }
+  return '';
+}
+
+async function createCompactImageDataUri(file: File): Promise<string | undefined> {
+  if (!file.type.startsWith('image/') && !/\.(png|jpe?g|webp|gif|bmp)$/i.test(file.name)) {
+    return undefined;
+  }
+  try {
+    if (file.size <= 220 * 1024) {
+      return await new Promise<string | undefined>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : undefined);
+        reader.onerror = () => resolve(undefined);
+        reader.readAsDataURL(file);
+      });
+    }
+    const imgUrl = URL.createObjectURL(file);
+    try {
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = reject;
+        image.src = imgUrl;
+      });
+      const maxDim = 1024;
+      const scale = Math.min(1, maxDim / Math.max(img.width || 1, img.height || 1));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(img.width * scale));
+      canvas.height = Math.max(1, Math.round(img.height * scale));
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return undefined;
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const dataUri = canvas.toDataURL('image/jpeg', 0.72);
+      return dataUri.length <= 260000 ? dataUri : canvas.toDataURL('image/jpeg', 0.5);
+    } finally {
+      URL.revokeObjectURL(imgUrl);
+    }
+  } catch {
+    return undefined;
+  }
+}
 
 interface SectionExercise {
   question: string;
@@ -1029,82 +1116,222 @@ export default function DocumentViewer({
     }
     if (!uploadFile) return;
 
-    // Client-side file size check (Support documents up to 100MB)
-    if (uploadFile.size > 105 * 1024 * 1024) {
-      setUploadStatus(`Error: File is too large (${(uploadFile.size / (1024 * 1024)).toFixed(1)} MB). The maximum allowed upload size is 100MB.`);
+    const selectedFile = uploadFile;
+    const selectedCategory = uploadCategory;
+
+    // Enforce 50MB max upload limit consistently
+    const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+    if (selectedFile.size > MAX_UPLOAD_BYTES) {
+      setUploadStatus(`Error: File is too large (${(selectedFile.size / (1024 * 1024)).toFixed(1)} MB). Please select a file up to 50MB.`);
       return;
     }
 
     setUploadLoading(true);
-    setUploadStatus(`Uploading ${uploadFile.name} (${(uploadFile.size / (1024 * 1024)).toFixed(1)} MB) & structuring syllabus notes...`);
+    setUploadStatus(`Preparing ${selectedFile.name} (${(selectedFile.size / (1024 * 1024)).toFixed(1)} MB) for syllabus indexing...`);
 
-    const performUpload = async (attempt: number = 1): Promise<any> => {
-      setUploadStatus(`Uploading ${uploadFile.name} (${(uploadFile.size / (1024 * 1024)).toFixed(1)} MB) & saving to curriculum...`);
-      const formData = new FormData();
-      formData.append('file', uploadFile);
-      formData.append('category', uploadCategory);
-      formData.append('userId', userId || 'usr_admin');
-      if (userEmail) {
-        formData.append('userEmail', userEmail);
+    const commonHeaders = {
+      'x-user-role': userRole || (isAdmin ? 'admin' : 'student'),
+      'x-user-id': userId || 'usr_admin',
+      'x-user-email': userEmail || ''
+    };
+
+    const parseJsonSafe = async (res: Response) => {
+      const responseText = await res.text();
+      let data: any = {};
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        if (!res.ok) {
+          if (res.status === 413) {
+            throw new Error(`The uploaded file exceeds the allowed upload limit (${(selectedFile.size / (1024 * 1024)).toFixed(1)} MB). Please select a file up to 50MB.`);
+          }
+          if (res.status === 504 || res.status === 502) {
+            throw new Error('Server connection timed out while analyzing the document. Please retry.');
+          }
+          throw new Error(`Server returned HTTP ${res.status} (${res.statusText || 'Error'}).`);
+        }
+        throw new Error('Server response could not be parsed as valid JSON.');
       }
+      if (!res.ok) throw new Error(data.error || `Upload failed with status ${res.status}`);
+      return data;
+    };
+
+    const performDirectUpload = async (attempt: number = 1): Promise<any> => {
+      setUploadStatus(`Uploading ${selectedFile.name} (${(selectedFile.size / (1024 * 1024)).toFixed(1)} MB) & saving to curriculum...`);
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+      formData.append('category', selectedCategory);
+      formData.append('userId', userId || 'usr_admin');
+      if (userEmail) formData.append('userEmail', userEmail);
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout for large documents
-
+      const timeoutId = setTimeout(() => controller.abort(), 300000);
       try {
         const res = await fetch('/api/documents/upload', {
           method: 'POST',
-          headers: {
-            'x-user-role': userRole || (isAdmin ? 'admin' : 'student'),
-            'x-user-id': userId || 'usr_admin',
-            'x-user-email': userEmail || ''
-          },
+          headers: commonHeaders,
           body: formData,
           signal: controller.signal
         });
         clearTimeout(timeoutId);
-
-        const responseText = await res.text();
-        let data: any = {};
-        try {
-          data = JSON.parse(responseText);
-        } catch {
-          if (!res.ok) {
-            if (res.status === 413) {
-              throw new Error(`The uploaded file exceeds the allowed upload limit (${(uploadFile.size / (1024 * 1024)).toFixed(1)} MB). Please select a file up to 50MB.`);
-            }
-            if (res.status === 504 || res.status === 502) {
-              throw new Error('Server connection timed out while analyzing the document. Please retry.');
-            }
-            throw new Error(`Server returned HTTP ${res.status} (${res.statusText || 'Error'}).`);
-          }
-          throw new Error('Server response could not be parsed as valid JSON.');
-        }
-
-        if (!res.ok) throw new Error(data.error || `Upload failed with status ${res.status}`);
-        return data;
+        return await parseJsonSafe(res);
       } catch (err: any) {
         clearTimeout(timeoutId);
         if (attempt < 2 && (err?.name === 'AbortError' || err?.message === 'Failed to fetch' || err?.message?.includes('network'))) {
           setUploadStatus('Network interrupted. Retrying upload automatically...');
           await new Promise(r => setTimeout(r, 1500));
-          return performUpload(attempt + 1);
+          return performDirectUpload(attempt + 1);
         }
         throw err;
       }
     };
 
+    const performChunkedUpload = async (): Promise<any> => {
+      // 1. Extract searchable text / thumbnail in the browser first so large PDFs/images always index cleanly even across serverless lambdas
+      setUploadStatus(`Extracting chapters & readable text from ${selectedFile.name} (${(selectedFile.size / (1024 * 1024)).toFixed(1)} MB)...`);
+      const [extractedText, thumbnailDataUri] = await Promise.all([
+        extractTextInBrowserForLargeFile(selectedFile),
+        createCompactImageDataUri(selectedFile)
+      ]);
+
+      // 2. Upload binary in 1.8 MB chunks (safely under Vercel's 4.5 MB serverless request ceiling)
+      const CHUNK_SIZE = Math.floor(1.8 * 1024 * 1024);
+      const totalChunks = Math.max(1, Math.ceil(selectedFile.size / CHUNK_SIZE));
+      const uploadId = `upl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+      for (let i = 0; i < totalChunks; i++) {
+        const start = i * CHUNK_SIZE;
+        const end = Math.min(selectedFile.size, start + CHUNK_SIZE);
+        const chunkBlob = selectedFile.slice(start, end);
+        const pct = Math.round(((i + 1) / totalChunks) * 100);
+        setUploadStatus(`Uploading ${selectedFile.name}: part ${i + 1} of ${totalChunks} (${pct}%)...`);
+
+        let chunkOk = false;
+        let lastErr: any = null;
+        for (let attempt = 1; attempt <= 2 && !chunkOk; attempt++) {
+          try {
+            const chunkForm = new FormData();
+            chunkForm.append('chunk', chunkBlob, selectedFile.name);
+            chunkForm.append('uploadId', uploadId);
+            chunkForm.append('chunkIndex', String(i));
+            chunkForm.append('totalChunks', String(totalChunks));
+            chunkForm.append('filename', selectedFile.name);
+            chunkForm.append('userId', userId || 'usr_admin');
+            if (userEmail) chunkForm.append('userEmail', userEmail);
+
+            const chunkRes = await fetch('/api/documents/upload-chunk', {
+              method: 'POST',
+              headers: commonHeaders,
+              body: chunkForm
+            });
+            await parseJsonSafe(chunkRes);
+            chunkOk = true;
+          } catch (cErr) {
+            lastErr = cErr;
+            if (attempt < 2) await new Promise(r => setTimeout(r, 800));
+          }
+        }
+        if (!chunkOk) throw lastErr || new Error(`Chunk ${i + 1} upload failed.`);
+      }
+
+      // 3. Finalize document indexing & persist to Firestore
+      setUploadStatus(`Finalizing syllabus chapters and indexing ${selectedFile.name}...`);
+      const finalizeRes = await fetch('/api/documents/upload-finalize', {
+        method: 'POST',
+        headers: {
+          ...commonHeaders,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          uploadId,
+          filename: selectedFile.name,
+          contentType: selectedFile.type,
+          size: selectedFile.size,
+          category: selectedCategory,
+          userId: userId || 'usr_admin',
+          userEmail: userEmail || '',
+          totalChunks,
+          extractedText,
+          thumbnailDataUri
+        })
+      });
+      return await parseJsonSafe(finalizeRes);
+    };
+
     try {
-      const data = await performUpload();
+      let data: any;
+      const VERCEL_SAFE_DIRECT_LIMIT = Math.floor(2.2 * 1024 * 1024);
+
+      if (selectedFile.size > VERCEL_SAFE_DIRECT_LIMIT) {
+        // Try presigned S3 upload first when configured; otherwise use chunked serverless-safe upload
+        let presignedHandled = false;
+        try {
+          const preRes = await fetch('/api/documents/upload-presigned', {
+            method: 'POST',
+            headers: {
+              ...commonHeaders,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              filename: selectedFile.name,
+              contentType: selectedFile.type || 'application/octet-stream',
+              size: selectedFile.size,
+              category: selectedCategory,
+              userId: userId || 'usr_admin',
+              userEmail: userEmail || ''
+            })
+          });
+          if (preRes.ok) {
+            const preData = await preRes.json();
+            if (preData.uploadUrl && preData.fileKey) {
+              setUploadStatus(`Streaming ${selectedFile.name} to cloud object storage...`);
+              const putRes = await fetch(preData.uploadUrl, {
+                method: 'PUT',
+                headers: { 'Content-Type': selectedFile.type || 'application/octet-stream' },
+                body: selectedFile
+              });
+              if (putRes.ok) {
+                const procRes = await fetch('/api/documents/process-uploaded', {
+                  method: 'POST',
+                  headers: {
+                    ...commonHeaders,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({
+                    fileKey: preData.fileKey,
+                    docId: preData.docId,
+                    filename: selectedFile.name,
+                    category: selectedCategory,
+                    size: selectedFile.size,
+                    userId: userId || 'usr_admin',
+                    userEmail: userEmail || '',
+                    contentType: selectedFile.type
+                  })
+                });
+                data = await parseJsonSafe(procRes);
+                presignedHandled = true;
+              }
+            }
+          }
+        } catch (preErr) {
+          console.warn('Presigned path skipped, using chunked pipeline:', preErr);
+        }
+
+        if (!presignedHandled) {
+          data = await performChunkedUpload();
+        }
+      } else {
+        data = await performDirectUpload();
+      }
 
       setUploadStatus('Success! File uploaded and structured according to curriculum.');
       setUploadFile(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
-      
+
       // Auto-load and view the newly uploaded document immediately in W3Schools Reader
-      if (data.document) {
+      if (data?.document) {
         setSelectedCategory(data.document.category || 'All');
         setViewingDoc(data.document);
         setActiveSummary(null);
@@ -1113,7 +1340,7 @@ export default function DocumentViewer({
 
       // Safely notify parent to refresh documents list in background
       try {
-        await onUpload(uploadFile, uploadCategory);
+        await onUpload(selectedFile, selectedCategory);
       } catch (refreshErr) {
         console.warn('Background documents refresh warning:', refreshErr);
       }
@@ -1310,10 +1537,10 @@ export default function DocumentViewer({
             onEditDoc={isAdmin ? handleStartEdit : undefined}
             userRole={isAdmin ? 'admin' : userRole}
             onLaunchLinuxSimulator={() => {
-              onNavigateToSection('linux', viewingDoc.id, viewingDoc.category);
+              onNavigateToSection('linux_sim', viewingDoc.category as CategoryName, viewingDoc.id);
             }}
             onLaunchPythonSimulator={() => {
-              onNavigateToSection('python', viewingDoc.id, viewingDoc.category);
+              onNavigateToSection('python_sim', viewingDoc.category as CategoryName, viewingDoc.id);
             }}
           />
         )}
@@ -1331,7 +1558,7 @@ export default function DocumentViewer({
           {selectedCategory && selectedCategory !== 'All' ? `${selectedCategory} Study Manuals & Notes` : 'Technical Curriculum & Notes Library'}
         </h1>
         <p className="text-xs text-gray-500 dark:text-gray-400 font-medium mt-1">
-          Explore structured lessons, chapter notes, code snippets, and interactive sandboxes across 19 technical domains
+          Explore structured lessons, chapter notes, code snippets, and interactive sandboxes across {CATEGORIES.length} technical domains
         </p>
       </div>
 
@@ -1635,7 +1862,7 @@ export default function DocumentViewer({
                     ) : (
                       <div className="space-y-1">
                         <p className="text-xs font-semibold text-gray-600">Drag & drop or click to upload</p>
-                        <p className="text-[10px] text-gray-405">Supports PDF, Images (PNG, JPG, SVG), Blueprints, Drawings, DOCX, TXT</p>
+                        <p className="text-[10px] text-gray-405">Supports PDF, Images (PNG, JPG, SVG), Blueprints, Drawings, DOCX, TXT (up to 50MB)</p>
                       </div>
                     )}
                   </div>

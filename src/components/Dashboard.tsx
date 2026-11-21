@@ -43,6 +43,7 @@ export default function Dashboard({ progress, documents, onNavigateToSection, on
 
   const popularCourses = [
     { name: 'Networking', count: documents.filter(d => d.category === 'Networking').length, color: 'from-teal-700 to-teal-500', desc: 'Router, Switched VLANs, OSI layers, IPv4/IPv6, & OSPF routing guides.' },
+    { name: 'Wide Area Network', count: documents.filter(d => d.category === 'Wide Area Network').length, color: 'from-cyan-700 to-emerald-600', desc: 'MPLS label switching, SD-WAN overlays, BGP peering, Metro Ethernet, & IPsec WAN tunnels.' },
     { name: 'Linux', count: documents.filter(d => d.category === 'Linux').length, color: 'from-slate-700 to-slate-900', desc: 'GNU filesystems, bash scripting commands, permissions, & cron utilities.' },
     { name: 'Window Server', count: documents.filter(d => d.category === 'Window Server' || d.category === 'Windows Server').length, color: 'from-blue-700 to-indigo-600', desc: 'Active Directory, Domain Controllers, GPOs, & Windows Server 2022 administration.' },
     { name: 'Cyber Security', count: documents.filter(d => d.category === 'Cyber Security').length, color: 'from-blue-600 to-teal-600', desc: 'Stateful firewalls, packet filters, cryptography protocols, & penetration logs.' },
