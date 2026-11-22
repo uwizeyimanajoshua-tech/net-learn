@@ -4,9 +4,11 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { initializeFirestore, getFirestore, Firestore, doc, setDoc, updateDoc, deleteDoc, collection, getDocs, writeBatch } from 'firebase/firestore';
+import { initializeFirestore, getFirestore, memoryLocalCache, setLogLevel, Firestore, doc, setDoc, updateDoc, deleteDoc, collection, getDocs, writeBatch } from 'firebase/firestore';
 import type { User, Document, ChatSession, Quiz, Flashcard, StudentProgress, OfficialExam, ExamSession, ExamSubmission } from '../types.js';
 import { CATEGORIES } from '../types.js';
+
+setLogLevel('error');
 
 // Read Firebase applet configuration
 const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
@@ -29,6 +31,7 @@ try {
     try {
       dbFirestore = initializeFirestore(app, {
         experimentalAutoDetectLongPolling: true,
+        localCache: memoryLocalCache(),
       }, firebaseConfig.firestoreDatabaseId);
     } catch {
       dbFirestore = getFirestore(app, firebaseConfig.firestoreDatabaseId);

@@ -1,16 +1,20 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut as fbSignOut, User as FirebaseUser } from 'firebase/auth';
-import { initializeFirestore, getFirestore, doc, getDocFromServer, collection, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, where } from 'firebase/firestore';
+import { initializeFirestore, getFirestore, memoryLocalCache, setLogLevel, doc, getDocFromServer, collection, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, where } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
+
+// Suppress non-fatal internal Firestore SDK WARN fallback notices (e.g., BloomFilter hash count fallback)
+setLogLevel('error');
 
 // Initialize Firebase client instance
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// Database instance explicitly configured with long polling auto-detection to prevent GrpcConnection Listen stream RST_STREAM errors
+// Database instance explicitly configured with long polling auto-detection and fresh memory cache
 let firestoreInstance;
 try {
   firestoreInstance = initializeFirestore(app, {
     experimentalAutoDetectLongPolling: true,
+    localCache: memoryLocalCache(),
   }, firebaseConfig.firestoreDatabaseId);
 } catch {
   firestoreInstance = getFirestore(app, firebaseConfig.firestoreDatabaseId);
