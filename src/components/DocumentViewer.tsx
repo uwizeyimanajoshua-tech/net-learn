@@ -1034,15 +1034,15 @@ export default function DocumentViewer({
         const catLower = viewingDoc.category.toLowerCase();
         
         if (catLower.includes('python') || nameLower.includes('python')) {
-          defaultTemplate = `# Python Interactive Sandbox\n# Test variables, functions, and loops!\n\ndef greet_student(name):\n    print(f"Hello, {name}! Welcome to NexaLearn AI.")\n\ngreet_student("Joshua")\n\n# Try writing your own Python code below and press Run:\n`;
+          defaultTemplate = `# Python Interactive Sandbox\n# Test variables, functions, and loops!\n\ndef greet_student(name):\n    print(f"Hello, {name}! Welcome to JoshNet Elearning.")\n\ngreet_student("Joshua")\n\n# Try writing your own Python code below and press Run:\n`;
         } else if (catLower.includes('linux') || nameLower.includes('linux') || catLower.includes('unix')) {
           defaultTemplate = `# Linux Terminal Sandbox\n# Test bash commands and scripting workflows\n\necho "Current user: guest_student"\nls -la /var/log/nginx/\n\n# Try adding bash commands or shell scripts here:\n`;
         } else if (catLower.includes('cisco') || nameLower.includes('router') || nameLower.includes('switch') || catLower.includes('networking')) {
           defaultTemplate = `! Cisco IOS Command Simulator\nenable\nconfigure terminal\ninterface GigabitEthernet0/1\n ip address 192.168.1.1 255.255.255.0\n no shutdown\nshow ip interface brief\n`;
         } else if (catLower.includes('sql') || nameLower.includes('database') || nameLower.includes('query')) {
-          defaultTemplate = `-- SQL Query Sandbox\nSELECT student_id, name, course_score\nFROM nexalearn_syllabus_progress\nWHERE completed = true\nORDER BY course_score DESC;\n`;
+          defaultTemplate = `-- SQL Query Sandbox\nSELECT student_id, name, course_score\nFROM joshnet_syllabus_progress\nWHERE completed = true\nORDER BY course_score DESC;\n`;
         } else {
-          defaultTemplate = `// NexaLearn Interactive Concept Sandbox\n// Edit this summary, type a query, or paste code to analyze:\n\nmodule_concept = "${viewingDoc.name}"\n\nconsole.log("Analyzing syllabus outcomes for: " + module_concept);\n`;
+          defaultTemplate = `// JoshNet Elearning Interactive Concept Sandbox\n// Edit this summary, type a query, or paste code to analyze:\n\nmodule_concept = "${viewingDoc.name}"\n\nconsole.log("Analyzing syllabus outcomes for: " + module_concept);\n`;
         }
         setSandboxCode(defaultTemplate);
         

@@ -212,7 +212,7 @@ const DEFAULT_DB: DatabaseSchema = {
     },
     {
       id: 'usr_student',
-      email: 'student@netech.edu',
+      email: 'student@joshnet.rw',
       username: 'Student',
       password: 'student123',
       role: 'student',

@@ -56,7 +56,7 @@ export default function AIChat({ userId, user, documents, initialDocId, darkMode
   const speechRecognitionRef = useRef<any>(null);
 
   // Model selection
-  const [selectedModel, setSelectedModel] = useState('NETECH AI 2.5');
+  const [selectedModel, setSelectedModel] = useState('JoshNet AI 2.5');
   const [showModelDropdown, setShowModelDropdown] = useState(false);
 
   // Scoping parameter for documents
@@ -638,7 +638,7 @@ export default function AIChat({ userId, user, documents, initialDocId, darkMode
             </div>
             {sidebarOpen && (
               <span className="font-extrabold text-sm tracking-tight font-display truncate">
-                NETECH AI
+                JoshNet AI
               </span>
             )}
           </div>
@@ -885,25 +885,25 @@ export default function AIChat({ userId, user, documents, initialDocId, darkMode
                   darkMode ? 'bg-slate-900 border-white/10 text-gray-200' : 'bg-white border-gray-200 text-gray-800'
                 }`}>
                   <div
-                    onClick={() => { setSelectedModel('NETECH AI 2.5'); setShowModelDropdown(false); }}
+                    onClick={() => { setSelectedModel('JoshNet AI 2.5'); setShowModelDropdown(false); }}
                     className="p-2.5 rounded-xl hover:bg-gray-100 dark:hover:bg-white/5 cursor-pointer text-xs"
                   >
                     <div className="font-bold flex items-center justify-between">
-                      <span>NETECH AI 2.5</span>
-                      {selectedModel === 'NETECH AI 2.5' && <Check className="w-3.5 h-3.5 text-emerald-500" />}
+                      <span>JoshNet AI 2.5</span>
+                      {selectedModel === 'JoshNet AI 2.5' && <Check className="w-3.5 h-3.5 text-emerald-500" />}
                     </div>
                     <div className="text-[10px] text-gray-400">Standard fast & grounded model</div>
                   </div>
                   <div
-                    onClick={() => { setSelectedModel('NETECH AI Reasoning'); setThinkMode(true); setShowModelDropdown(false); }}
+                    onClick={() => { setSelectedModel('JoshNet AI Reasoning'); setThinkMode(true); setShowModelDropdown(false); }}
                     className="p-2.5 rounded-xl hover:bg-gray-100 dark:hover:bg-white/5 cursor-pointer text-xs"
                   >
                     <div className="font-bold flex items-center justify-between">
                       <span className="flex items-center gap-1">
                         <Brain className="w-3.5 h-3.5 text-indigo-500" />
-                        <span>NETECH Deep Reason</span>
+                        <span>JoshNet Deep Reason</span>
                       </span>
-                      {selectedModel === 'NETECH AI Reasoning' && <Check className="w-3.5 h-3.5 text-emerald-500" />}
+                      {selectedModel === 'JoshNet AI Reasoning' && <Check className="w-3.5 h-3.5 text-emerald-500" />}
                     </div>
                     <div className="text-[10px] text-gray-400">Step-by-step thinking for code & math</div>
                   </div>
@@ -1005,7 +1005,7 @@ export default function AIChat({ userId, user, documents, initialDocId, darkMode
                         handleSendMessage();
                       }
                     }}
-                    placeholder="Ask NETECH AI (or press Enter)..."
+                    placeholder="Ask JoshNet AI (or press Enter)..."
                     className={`flex-1 bg-transparent border-0 focus:outline-none text-sm font-medium px-2 ${
                       darkMode ? 'text-gray-100 placeholder-gray-400' : 'text-gray-900 placeholder-gray-400'
                     }`}
@@ -1243,7 +1243,7 @@ export default function AIChat({ userId, user, documents, initialDocId, darkMode
                       handleSendMessage();
                     }
                   }}
-                  placeholder="Ask NETECH AI (or press Enter)..."
+                  placeholder="Ask JoshNet AI (or press Enter)..."
                   className={`flex-1 bg-transparent border-0 focus:outline-none text-sm font-medium px-2 ${
                     darkMode ? 'text-gray-100 placeholder-gray-400' : 'text-gray-900 placeholder-gray-400'
                   }`}

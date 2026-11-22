@@ -168,7 +168,7 @@ export default function CertificatesShowcase({ darkMode, progress, documents, us
                   <button
                     onClick={() => {
                       if (navigator.clipboard) {
-                        navigator.clipboard.writeText(`https://net-learn.edu/verify/${activeCert.verifiedHash}`);
+                        navigator.clipboard.writeText(`https://net-learn-psi.vercel.app/?verify=${activeCert.verifiedHash}`);
                       }
                       setCopiedHash(true);
                       setTimeout(() => setCopiedHash(false), 2500);
@@ -207,10 +207,10 @@ export default function CertificatesShowcase({ darkMode, progress, documents, us
                   </div>
 
                   <h1 className="font-display font-black text-2xl sm:text-3xl tracking-widest text-teal-500 uppercase">
-                    NETECH
+                    JoshNet Elearning
                   </h1>
                   <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
-                    AI-Guided Technical Education Network &bull; Kigali, Rwanda
+                    Networking &amp; Internet Technology (NIT) &bull; Kigali, Rwanda
                   </p>
 
                   <div className="h-0.5 bg-gradient-to-r from-transparent via-teal-500/40 to-transparent my-4" />
@@ -240,8 +240,8 @@ export default function CertificatesShowcase({ darkMode, progress, documents, us
                   <div className="grid grid-cols-2 gap-8 pt-8 text-left text-[10px] font-bold">
                     <div className="border-t border-gray-400/25 pt-2 flex flex-col space-y-1">
                       <span className="text-gray-500 uppercase tracking-widest font-semibold">Verified Instructor</span>
-                      <span className={darkMode ? 'text-white' : 'text-teal-950'}>Joshua Uwizeyimana</span>
-                      <span className="text-teal-400/80 italic font-serif">Head of Engineering</span>
+                      <span className={darkMode ? 'text-white' : 'text-teal-950'}>Uwizeyimana Joshua</span>
+                      <span className="text-teal-400/80 italic font-serif">Founder &amp; Head of Engineering</span>
                     </div>
 
                     <div className="border-t border-gray-400/25 pt-2 flex flex-col space-y-1 text-right">
@@ -262,7 +262,7 @@ export default function CertificatesShowcase({ darkMode, progress, documents, us
                 No Certificate Selected
               </h3>
               <p className="text-xs text-gray-500 max-w-xs mt-1">
-                Select a certified credential from the left deck to view, print, or share your verifiable NETECH qualification.
+                Select a certified credential from the left deck to view, print, or share your verifiable JoshNet Elearning qualification.
               </p>
             </div>
           )}

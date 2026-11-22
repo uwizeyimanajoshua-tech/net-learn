@@ -29,7 +29,7 @@ export const C_PROJECT_TEMPLATES: CProjectTemplate[] = [
     description: 'Inspect hexadecimal memory addresses, pointer dereferencing, and value mutation via reference.',
     expectedOutputHint: 'Prints variable values, their exact physical RAM memory addresses (%p), and modified values.',
     code: `/* 
- * NETECH Academy - C Programming Dev IDE
+ * JoshNet Elearning - C Programming Dev IDE
  * Module: Pointers & Hexadecimal Memory Addresses
  */
 #include <stdio.h>
@@ -73,7 +73,7 @@ int main() {
     description: 'Allocate dynamic arrays on the Heap using malloc, resize with realloc, and properly deallocate with free to prevent memory leaks.',
     expectedOutputHint: 'Allocates heap memory, populates data, calculates statistics, and cleans up heap pointers.',
     code: `/* 
- * NETECH Academy - Heap Memory Management
+ * JoshNet Elearning - Heap Memory Management
  * Module: malloc, realloc, and memory leak prevention
  */
 #include <stdio.h>
@@ -139,7 +139,7 @@ int main() {
     description: 'Build a dynamic singly linked list in C with node structures, head insertion, tail insertion, and memory disposal.',
     expectedOutputHint: 'Constructs a linked list, performs node insertions, traverses links, and frees all allocated memory.',
     code: `/*
- * NETECH Academy - C Data Structures
+ * JoshNet Elearning - C Data Structures
  * Singly Linked List with Dynamic Node Allocation
  */
 #include <stdio.h>
@@ -227,7 +227,7 @@ int main() {
     description: 'Low-level Berkeley sockets in C: Create AF_INET socket, configure sockaddr_in struct, pack IP addresses with inet_pton, and simulate protocol communication.',
     expectedOutputHint: 'Creates socket descriptor, converts network byte order (htons), and handles TCP protocol states.',
     code: `/*
- * NETECH Academy - Systems & Network Programming in C
+ * JoshNet Elearning - Systems & Network Programming in C
  * Berkeley Sockets (AF_INET / SOCK_STREAM)
  */
 #include <stdio.h>
@@ -293,7 +293,7 @@ int main() {
     description: 'Process creation in Linux/Unix using fork(). Inspect parent and child process IDs, and pass data through an anonymous unidirectional pipe.',
     expectedOutputHint: 'Forks a child process, exchanges messages through pipe, and verifies exit status with waitpid.',
     code: `/*
- * NETECH Academy - OS Kernel & Process Architecture
+ * JoshNet Elearning - OS Kernel & Process Architecture
  * fork(), pipe(), and process synchronization
  */
 #include <stdio.h>
@@ -364,7 +364,7 @@ int main() {
     description: 'Compute network IDs, broadcast addresses, and wildcard masks using high-performance C bitwise operators (AND, OR, NOT, Shifts).',
     expectedOutputHint: 'Parses IP and CIDR prefix, applies bitmask, and calculates network and broadcast addresses.',
     code: `/*
- * NETECH Academy - Bitwise Calculations for Subnetting
+ * JoshNet Elearning - Bitwise Calculations for Subnetting
  * Bit twiddling: bitwise AND (&), OR (|), NOT (~), shifts (<<, >>)
  */
 #include <stdio.h>

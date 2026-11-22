@@ -127,70 +127,70 @@ export default function App() {
 
   // When active tab, category, or document changes, update title, meta description, and canonical URL dynamically for SEO
   useEffect(() => {
-    let pageTitle = 'NET LEARN – Technical Learning & Systems Engineering';
-    let pageDesc = 'A premium educational platform styled after W3Schools, built for Networking, IT, Linux, Python, and Technology students featuring integrated interactive simulations, virtual labs, and exams.';
+    let pageTitle = 'JoshNet Elearning (JoshNet) – Networking & Internet Technology (NIT) Rwanda';
+    let pageDesc = 'JoshNet Elearning (JoshNet) is Rwanda\'s Networking and Internet Technology (NIT) platform founded by Uwizeyimana Joshua, offering TVET notes, Cisco/Linux/Python labs, and exams.';
 
     const matchedDoc = navFilterDocId ? documents.find(d => d.id === navFilterDocId) : null;
 
     if (matchedDoc) {
-      pageTitle = `${matchedDoc.name} – ${matchedDoc.category} Course Note | NET LEARN`;
-      pageDesc = `Study ${matchedDoc.name} in ${matchedDoc.category}. Interactive W3Schools-style note with code examples, practice questions, and AI tutoring.`;
+      pageTitle = `${matchedDoc.name} – ${matchedDoc.category} Course Note | JoshNet Elearning`;
+      pageDesc = `Study ${matchedDoc.name} in ${matchedDoc.category} on JoshNet Elearning (NIT Rwanda, founded by Uwizeyimana Joshua). Interactive notes, code examples, practice questions, and AI tutoring.`;
     } else if (navFilterCategory) {
-      pageTitle = `${navFilterCategory} Technical Curriculum & Notes | NET LEARN`;
-      pageDesc = `Explore comprehensive ${navFilterCategory} course notes, structured lessons, interactive command sandboxes, and practice exercises.`;
+      pageTitle = `${navFilterCategory} Technical Curriculum & Notes | JoshNet Elearning`;
+      pageDesc = `Explore comprehensive ${navFilterCategory} course notes for Networking and Internet Technology (NIT) in Rwanda on JoshNet Elearning.`;
     } else {
       const titles: Record<string, { title: string; desc: string }> = {
         dashboard: {
-          title: 'NET LEARN – Home | Technical Learning & Systems Engineering',
-          desc: 'Study Networking, Linux operations, Active Directory administration, Cyber Security, and systems programming with interactive sandboxes and AI tutoring.'
+          title: 'JoshNet Elearning (JoshNet) – Networking & Internet Technology (NIT) Rwanda',
+          desc: 'JoshNet Elearning, founded by Uwizeyimana Joshua in Rwanda, empowers NIT students with Networking, Linux, Windows Server, Cyber Security, C, and Python virtual labs.'
         },
         c_ide: {
-          title: 'C Programming IDE & GCC Compiler | NET LEARN',
-          desc: 'Online C development environment with native GCC 12.3 compiler, x86_64 Intel assembly disassembly, heap memory tracking, and systems programming projects.'
+          title: 'C Programming IDE & GCC Compiler | JoshNet Elearning',
+          desc: 'Online C development environment on JoshNet Elearning with native GCC 12.3 compiler, x86_64 Intel assembly disassembly, heap memory tracking, and systems programming projects.'
         },
         documents: {
-          title: 'Technical Curriculum & Notes Library | NET LEARN',
-          desc: `Browse ${CATEGORIES.length} technical domains, W3Schools-styled chapter notes, executable code tutorials, and practice exercises.`
+          title: 'NIT Curriculum & Notes Library | JoshNet Elearning Rwanda',
+          desc: `Browse ${CATEGORIES.length} Networking and Internet Technology (NIT) domains, course notes, executable code tutorials, and practice exercises on JoshNet Elearning.`
         },
         exams: {
-          title: 'Technical Practice Exams & Certification Simulator | NET LEARN',
-          desc: 'Simulate timed exams, Rwanda TVET board assessments, and CCNA/Linux certification quizzes with instant scoring and explanations.'
+          title: 'Official Timed Exams & Practice Simulator | JoshNet Elearning',
+          desc: 'Take official timed & locked NIT exams, Rwanda TVET board assessments, and CCNA/Linux certification quizzes on JoshNet Elearning.'
         },
         ai_chat: {
-          title: 'NIT AI Technical Mentorship & Copilot | NET LEARN',
-          desc: 'Consult your intelligent AI technical tutor grounded in Rwanda TVET curriculum, networking standards, and live systems documentation.'
+          title: 'NIT AI Technical Mentorship & Copilot | JoshNet Elearning',
+          desc: 'Consult your intelligent AI technical tutor on JoshNet Elearning grounded in Rwanda NIT/TVET curriculum, networking standards, and live systems documentation.'
         },
         linux_sim: {
-          title: 'Linux OS Terminal Simulator (Ubuntu 24.04 LTS) | NET LEARN',
-          desc: 'Interactive Ubuntu Linux bash terminal simulator with real command execution, file management, nginx auditing, and system diagnostics.'
+          title: 'Linux OS Terminal Simulator (Ubuntu 24.04 LTS) | JoshNet Elearning',
+          desc: 'Interactive Ubuntu Linux bash terminal simulator on JoshNet Elearning with real command execution, file management, nginx auditing, and system diagnostics.'
         },
         python_sim: {
-          title: 'Python 3 & Machine Learning Execution Sandbox | NET LEARN',
-          desc: 'Write and run Python 3 scripts with NumPy, train linear regressions, evaluate classification decision trees, and view neural network loss curves.'
+          title: 'Python 3 & Machine Learning Execution Sandbox | JoshNet Elearning',
+          desc: 'Write and run Python 3 scripts with NumPy, train linear regressions, and evaluate decision trees on JoshNet Elearning.'
         },
         flashcards: {
-          title: 'Technical Flashcards & Active Recall Deck | NET LEARN',
-          desc: 'Master key networking, operating systems, and computing concepts with interactive 3D flippable study flashcards.'
+          title: 'Technical Flashcards & Active Recall Deck | JoshNet Elearning',
+          desc: 'Master Networking and Internet Technology (NIT) concepts with interactive 3D flippable study flashcards on JoshNet Elearning.'
         },
         videos: {
-          title: 'Video Lectures & Practical Labs | NET LEARN',
-          desc: 'Watch high-definition technical video lectures, lab demonstrations, and step-by-step systems engineering tutorials.'
+          title: 'Video Lectures & Practical Labs | JoshNet Elearning',
+          desc: 'Watch technical video lectures, lab demonstrations, and step-by-step systems engineering tutorials on JoshNet Elearning.'
         },
         community: {
-          title: 'Student & Faculty Community Forum | NET LEARN',
-          desc: 'Collaborate with technical students and instructors across East Africa, discuss troubleshooting challenges, and share solutions.'
+          title: 'Student & Faculty Community Forum | JoshNet Elearning',
+          desc: 'Collaborate with Networking and Internet Technology (NIT) students and instructors across Rwanda on JoshNet Elearning.'
         },
         certificates: {
-          title: 'Verified Course Certificates & Transcripts | NET LEARN',
-          desc: 'Verify student achievements, module completion progress, and credentials for technical certification courses.'
+          title: 'Verified Course Certificates & Transcripts | JoshNet Elearning',
+          desc: 'Verify student achievements, module completion progress, and JoshNet Elearning credentials founded by Uwizeyimana Joshua.'
         },
         about: {
-          title: 'About NETECH – Africa’s Premier Technical Education Hub | NET LEARN',
-          desc: 'Learn about the NETECH educational mission, curriculum grounding standards, and our engineering team in Kigali, Rwanda.'
+          title: 'About JoshNet Elearning – Networking & Internet Technology (NIT) Rwanda',
+          desc: 'Learn about JoshNet Elearning (JoshNet), founded by Uwizeyimana Joshua for Networking and Internet Technology (NIT) students in Rwanda.'
         },
         admin: {
-          title: 'Administrator Analytics & Curriculum Portal | NET LEARN',
-          desc: 'Administrative controls for course material uploads, user management, and student learning analytics.'
+          title: 'Administrator Analytics & Curriculum Portal | JoshNet Elearning',
+          desc: 'Administrative controls for course material uploads, exam answers, user management, and analytics on JoshNet Elearning.'
         }
       };
 
@@ -325,7 +325,7 @@ export default function App() {
   const handleLogout = () => {
     const guestUser = {
       id: 'usr_student',
-      email: 'student@netlearn.ai',
+      email: 'student@joshnet.rw',
       username: 'Guest Student',
       role: 'student',
       isVerified: true
@@ -421,7 +421,7 @@ export default function App() {
     }));
   };
 
-  // Map of active tab indicators for primary header items (NET LEARN layout)
+  // Map of active tab indicators for primary header items (JoshNet Elearning layout)
   const mainNavItems = [
     { id: 'dashboard', label: 'Home' },
     { id: 'documents', label: 'Learn' },
@@ -449,14 +449,14 @@ export default function App() {
           <div className="flex items-center gap-2.5 cursor-pointer hover:opacity-90 transition-all" onClick={() => handleNavigateToSection('dashboard')}>
             <img 
               src={netLearnLogo} 
-              alt="NETECH Logo" 
+              alt="JoshNet Elearning Logo" 
               className="w-10 h-10 object-contain rounded-xl shadow-sm border border-emerald-500/20"
               referrerPolicy="no-referrer"
               onError={(e) => { e.currentTarget.src = '/logo.jpg'; }}
             />
             <div className="flex flex-col text-left">
-              <span className={`font-display font-black text-lg tracking-tight ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                NETECH
+              <span className={`font-display font-black text-base sm:text-lg tracking-tight whitespace-nowrap ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                JoshNet Elearning
               </span>
             </div>
           </div>
@@ -613,7 +613,7 @@ export default function App() {
       {/* 4. MOBILE DRAWER NAVIGATION */}
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-40 bg-slate-950/95 backdrop-blur-md lg:hidden pt-20 px-6 space-y-4 animate-fade-in text-left">
-          <div className="text-[10px] font-mono font-bold text-teal-400 uppercase tracking-widest border-b border-white/5 pb-2">NETECH Sections</div>
+          <div className="text-[10px] font-mono font-bold text-teal-400 uppercase tracking-widest border-b border-white/5 pb-2">JoshNet Elearning Sections</div>
           {mainNavItems.map(item => (
             <button
               key={item.id}

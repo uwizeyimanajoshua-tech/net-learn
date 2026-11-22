@@ -1,10 +1,11 @@
-# robots.txt for NET LEARN / NETECH Platform
+# robots.txt for JoshNet Elearning (JoshNet) - Networking & Internet Technology (NIT) Rwanda
 User-agent: *
 Allow: /
 Allow: /?tab=*
 Allow: /?category=*
 Allow: /api/documents
 Allow: /sitemap.xml
+Allow: /opensearch.xml
 Disallow: /api/auth/
 Disallow: /api/chats/
 Disallow: /api/progress/

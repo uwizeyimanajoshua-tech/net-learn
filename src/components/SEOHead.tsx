@@ -9,50 +9,50 @@ interface SEOHeadProps {
 
 const TAB_SEO_MAP: Record<string, { title: string; description: string }> = {
   dashboard: {
-    title: 'NETECH – Technical Learning, Networking & Systems Engineering',
-    description: 'Master Windows Server, Linux Administration, CCNA Networking, and Cyber Security with W3Schools-styled curriculum and NIT AI mentorship.'
+    title: 'JoshNet Elearning (JoshNet) – Networking & Internet Technology (NIT) Rwanda',
+    description: 'JoshNet Elearning, founded by Uwizeyimana Joshua in Rwanda, empowers NIT students in Windows Server, Linux Administration, CCNA Networking, and Cyber Security.'
   },
   documents: {
-    title: 'Curriculum Library & Study Notes – NETECH',
-    description: 'Explore comprehensive course notes, architectural SVG diagrams, learning outcomes, and indicative content for Windows Server, Linux, Networking, and Cyber Security.'
+    title: 'Curriculum Library & Study Notes – JoshNet Elearning',
+    description: 'Explore comprehensive NIT Rwanda course notes, architectural SVG diagrams, learning outcomes, and indicative content on JoshNet Elearning.'
   },
   linux_sim: {
-    title: 'Linux Terminal & Shell Simulator – NETECH',
-    description: 'Practice real Bash terminal commands, file permissions (chmod/chown), systemd daemons, and package management in a browser-based Linux sandbox.'
+    title: 'Linux Terminal & Shell Simulator – JoshNet Elearning',
+    description: 'Practice real Bash terminal commands, file permissions (chmod/chown), systemd daemons, and package management in the JoshNet Elearning Linux sandbox.'
   },
   python_sim: {
-    title: 'Python Code Sandbox & Lab – NETECH',
-    description: 'Write, run, and experiment with Python code in a real-time browser environment with syntax feedback and practical exercises.'
+    title: 'Python Code Sandbox & Lab – JoshNet Elearning',
+    description: 'Write, run, and experiment with Python code in a real-time browser environment on JoshNet Elearning.'
   },
   exams: {
-    title: 'Certification Practice Exams & Quizzes – NETECH',
-    description: 'Prepare for CCNA, Linux+, and Windows Server certifications with mock tests, timed assessments, and instant step-by-step explanations.'
+    title: 'Official Timed Exams & Practice Quizzes – JoshNet Elearning',
+    description: 'Prepare for NIT Rwanda, CCNA, Linux+, and Windows Server certifications with timed assessments and instant explanations on JoshNet Elearning.'
   },
   flashcards: {
-    title: 'Technical Study Flashcards & Key Terms – NETECH',
-    description: 'Review technical definitions, acronyms, ports, commands, and core concepts with spaced repetition study flashcards.'
+    title: 'Technical Study Flashcards & Key Terms – JoshNet Elearning',
+    description: 'Review technical definitions, acronyms, ports, commands, and core NIT concepts with spaced repetition study flashcards on JoshNet Elearning.'
   },
   chats: {
-    title: 'NIT AI Technical Study Assistant & Mentor – NETECH',
-    description: 'Ask questions, get syllabus explanations with verified grounded citations, and troubleshoot commands with the NIT AI technical tutor.'
+    title: 'NIT AI Technical Study Assistant & Mentor – JoshNet Elearning',
+    description: 'Ask questions, get syllabus explanations with verified grounded citations, and troubleshoot commands with the NIT AI tutor on JoshNet Elearning.'
   },
   analytics: {
-    title: 'Student Progress & Lab Analytics – NETECH',
-    description: 'Track course module completion, quiz scores, strengths, and study milestones across all syllabus topics.'
+    title: 'Student Progress & Lab Analytics – JoshNet Elearning',
+    description: 'Track course module completion, quiz scores, strengths, and study milestones across all JoshNet Elearning topics.'
   }
 };
 
 export default function SEOHead({ activeTab, categoryFilter, activeDocTitle }: SEOHeadProps) {
   useEffect(() => {
-    let title = TAB_SEO_MAP[activeTab]?.title || 'NETECH – Technical Learning Platform';
-    let description = TAB_SEO_MAP[activeTab]?.description || 'A comprehensive technical education platform for Windows Server, Linux, CCNA Networking, and Cyber Security.';
+    let title = TAB_SEO_MAP[activeTab]?.title || 'JoshNet Elearning (JoshNet) – Networking & Internet Technology (NIT) Rwanda';
+    let description = TAB_SEO_MAP[activeTab]?.description || 'JoshNet Elearning is Rwanda\'s Networking and Internet Technology (NIT) platform founded by Uwizeyimana Joshua.';
 
     if (activeDocTitle) {
-      title = `${activeDocTitle} – NETECH Syllabus`;
-      description = `Study ${activeDocTitle}. Includes learning outcomes, indicative content, architectural diagrams, and self-assessment questions.`;
+      title = `${activeDocTitle} – JoshNet Elearning Syllabus`;
+      description = `Study ${activeDocTitle} on JoshNet Elearning (NIT Rwanda). Includes learning outcomes, indicative content, architectural diagrams, and self-assessment questions.`;
     } else if (categoryFilter) {
-      title = `${categoryFilter} Notes & Curriculum – NETECH`;
-      description = `Browse all official study materials, practical labs, and revision guides for ${categoryFilter}.`;
+      title = `${categoryFilter} Notes & Curriculum – JoshNet Elearning`;
+      description = `Browse all official NIT study materials, practical labs, and revision guides for ${categoryFilter} on JoshNet Elearning.`;
     }
 
     // Update document title

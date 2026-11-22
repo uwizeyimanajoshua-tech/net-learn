@@ -52,10 +52,10 @@ export default function AboutUs({ darkMode }: AboutUsProps) {
   };
 
   const faqs = [
-    { q: 'Is NETECH free for all students?', a: 'Yes! NETECH is 100% free. You can view course syllabus materials, practice on our interactive sandbox console, and consult with NIT AI without paying anything.' },
-    { q: 'Can I upload my own PDF textbook materials?', a: 'Absolutely. If you sign in as an Administrator, you can upload any textbook, lecture slide, or exam file. Our backend automatically extracts the text and splits it into searchable chapters for interactive study.' },
+    { q: 'Is JoshNet Elearning free for all students?', a: 'Yes! JoshNet Elearning (JoshNet) is 100% free. You can view Networking and Internet Technology (NIT) syllabus materials, practice on our interactive sandbox console, take timed exams, and consult with NIT AI without paying anything.' },
+    { q: 'Who founded and created JoshNet Elearning?', a: 'JoshNet Elearning was founded and created by Uwizeyimana Joshua to empower Networking and Internet Technology (NIT) and TVET students across Rwanda with modern interactive learning tools.' },
     { q: 'What is Curriculum & Live Grounding?', a: 'Our educational platform uses real-time curriculum retrieval and Google Search integration to cross-reference your exact uploaded chapters and check live documentation before answering, ensuring high accuracy and zero hallucinations.' },
-    { q: 'Where is NETECH based?', a: 'NETECH is proudly designed and maintained by senior software engineers in Kigali, Rwanda, to serve students preparing for technical careers and professional IT certifications across Africa!' }
+    { q: 'Where is JoshNet Elearning based?', a: 'JoshNet Elearning is proudly built for Networking and Internet Technology (NIT) in Kigali, Rwanda, serving students preparing for TVET assessments and professional IT certifications across Rwanda and Africa!' }
   ];
 
   return (
@@ -67,15 +67,15 @@ export default function AboutUs({ darkMode }: AboutUsProps) {
       }`}>
         <div className="max-w-2xl space-y-4">
           <div className="inline-flex items-center gap-1 text-teal-500 font-black text-xs uppercase tracking-widest font-mono">
-            <Landmark className="w-4 h-4" /> Kigali, Rwanda
+            <Landmark className="w-4 h-4" /> Networking &amp; Internet Technology (NIT) • Rwanda
           </div>
           <h1 className={`font-display text-3xl sm:text-4xl font-black tracking-tight leading-tight ${
             darkMode ? 'text-white' : 'text-teal-950'
           }`}>
-            About NETECH – Africa’s Premier Interactive Technical Education Hub
+            About JoshNet Elearning – NIT Rwanda’s Interactive Education Hub
           </h1>
           <p className="text-xs sm:text-sm leading-relaxed text-gray-500">
-            NETECH bridges the gap in technical skills across Rwanda and East Africa. Our mission is to democratize training for Networking, Linux operations, Active Directory administration, Cyber Security, and more by pairing standard textbooks with intelligent, context-grounded NIT AI mentors and interactive sandboxes.
+            Founded and created by <strong>Uwizeyimana Joshua</strong>, JoshNet Elearning (JoshNet) is built around <strong>Networking and Internet Technology (NIT)</strong> in Rwanda. Our mission is to democratize training for Networking, Wide Area Networks, Linux operations, Windows Server administration, Cyber Security, and programming with context-grounded NIT AI mentors and interactive sandboxes.
           </p>
         </div>
       </div>
@@ -141,7 +141,7 @@ export default function AboutUs({ darkMode }: AboutUsProps) {
           </div>
         </div>
 
-        {/* CORE PILLARS OF NET LEARN */}
+        {/* CORE PILLARS OF JOSHNET ELEARNING */}
         <div className="space-y-4">
           <div className="flex items-start gap-4">
             <div className="p-3 bg-teal-500/10 text-teal-400 rounded-xl shrink-0 border border-teal-500/10">
@@ -195,7 +195,7 @@ export default function AboutUs({ darkMode }: AboutUsProps) {
             Frequently Asked Questions
           </h3>
           <p className="text-[11px] text-gray-500 font-bold uppercase tracking-widest mt-0.5">
-            Everything you need to know about the NETECH framework
+            Everything you need to know about the JoshNet Elearning framework
           </p>
         </div>
 

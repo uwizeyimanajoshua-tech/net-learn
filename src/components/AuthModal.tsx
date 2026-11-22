@@ -279,7 +279,7 @@ export default function AuthModal({ onSuccess, onClose, darkMode }: AuthModalPro
           const fallbackToken = `token_${Date.now()}_reg`;
           localStorage.setItem('netlearn_token', fallbackToken);
           localStorage.setItem('netlearn_user', JSON.stringify(fallbackUser));
-          setNotification('Account created successfully! Welcome to NETECH.');
+          setNotification('Account created successfully! Welcome to JoshNet Elearning.');
           setTimeout(() => {
             onSuccess(fallbackUser, fallbackToken);
           }, 350);
@@ -291,7 +291,7 @@ export default function AuthModal({ onSuccess, onClose, darkMode }: AuthModalPro
         if (data.token && data.user) {
           localStorage.setItem('netlearn_token', data.token);
           localStorage.setItem('netlearn_user', JSON.stringify(data.user));
-          setNotification(data.message || 'Account created successfully! Welcome to NETECH.');
+          setNotification(data.message || 'Account created successfully! Welcome to JoshNet Elearning.');
           setTimeout(() => {
             onSuccess(data.user, data.token);
           }, 400);
@@ -359,7 +359,7 @@ export default function AuthModal({ onSuccess, onClose, darkMode }: AuthModalPro
           <Sparkles className="w-5 h-5" />
         </div>
         <h3 className="font-display font-black text-2xl tracking-tight">
-          {mode === 'login' && 'Sign In to NETECH'}
+          {mode === 'login' && 'Sign In to JoshNet Elearning'}
           {mode === 'register' && 'Create Your Account'}
           {mode === 'forgot' && 'Reset Your Password'}
           {mode === 'verify' && 'Verify Account'}

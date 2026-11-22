@@ -150,7 +150,7 @@ export default function TeacherPanel({ userId, darkMode }: TeacherPanelProps) {
                   <div className="w-12 h-12 rounded-full bg-slate-900 flex items-center justify-center text-xl mx-auto shadow-sm">👨‍💻</div>
                   <div>
                     <h5 className="font-display font-bold text-sm text-gray-200">Classroom whiteboard is blank</h5>
-                    <p className="text-xs text-gray-500 mt-1">Specify a concept, click a teaching strategy preset, and watch NexaLearn compile the configurations immediately.</p>
+                    <p className="text-xs text-gray-500 mt-1">Specify a concept, click a teaching strategy preset, and watch JoshNet Elearning compile the configurations immediately.</p>
                   </div>
                 </div>
               )}
@@ -159,7 +159,7 @@ export default function TeacherPanel({ userId, darkMode }: TeacherPanelProps) {
 
           {result && !loading && (
             <div className="pt-4 border-t border-gray-200/10 dark:border-gray-800/40 flex items-center justify-between text-[10px] text-gray-500">
-              <span>Lesson compiled by NexaLearn Trainer</span>
+              <span>Lesson compiled by JoshNet Elearning Trainer</span>
               <button
                 onClick={() => {
                   navigator.clipboard.writeText(result);

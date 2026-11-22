@@ -65,9 +65,9 @@ export default function Dashboard({ progress, documents, onNavigateToSection, on
   ];
 
   const testimonials = [
-    { name: 'Joshua K.', role: 'IT Support Engineer Student (Kigali)', text: 'NETECH changed how I prepare for my CCNA exams! The NIT AI Packet Tracer labs and interactive flashcards helped me pass my syllabus modules.', rating: 5 },
-    { name: 'Amina U.', role: 'Junior Linux Administrator (Gisenyi)', text: 'W3Schools has always been my go-to for reference, but NETECH gives us personalized NIT AI mentorship sessions grounded in our exact syllabus! The sandbox console simulations are incredible.', rating: 5 },
-    { name: 'Damien N.', role: 'Computer Science Major (Butare)', text: 'Being able to take quick practice quizzes generated on demand for our technical drawings and databases is a complete game-changer.', rating: 5 }
+    { name: 'Joshua K.', role: 'NIT Student (Kigali, Rwanda)', text: 'JoshNet Elearning changed how I prepare for my Networking and Internet Technology (NIT) exams! The NIT AI Packet Tracer labs and interactive flashcards helped me pass my syllabus modules.', rating: 5 },
+    { name: 'Amina U.', role: 'Junior Linux Administrator (Gisenyi)', text: 'W3Schools has always been my go-to for reference, but JoshNet Elearning gives us personalized NIT AI mentorship sessions grounded in our exact Rwanda TVET syllabus! The sandbox console simulations are incredible.', rating: 5 },
+    { name: 'Damien N.', role: 'NIT Networking Major (Butare)', text: 'Being able to take official timed exams and practice quizzes generated on demand for our Networking and Internet Technology courses on JoshNet is a complete game-changer.', rating: 5 }
   ];
 
   const featuredDocs = documents.slice(0, 3);
@@ -88,19 +88,19 @@ export default function Dashboard({ progress, documents, onNavigateToSection, on
             darkMode ? 'bg-teal-500/10 text-teal-400 border border-teal-500/20' : 'bg-teal-100 text-teal-900 border border-teal-200'
           }`}>
             <Sparkles className="w-3.5 h-3.5 animate-pulse text-teal-500" />
-            Interactive Tech & IT Labs
+            Networking &amp; Internet Technology (NIT) Rwanda
           </span>
           
           <h1 className={`font-display text-4xl sm:text-6xl font-black tracking-tight leading-[1.05] ${
             darkMode ? 'text-white' : 'text-teal-950'
           }`}>
-            Learn Tech & Skills with NETECH
+            Learn NIT &amp; Tech Skills with JoshNet Elearning
           </h1>
           
           <p className={`text-sm sm:text-base max-w-xl mx-auto leading-relaxed font-medium ${
             darkMode ? 'text-gray-300' : 'text-teal-900/90'
           }`}>
-            Free syllabus textbooks, interactive Packet Tracer configurations, Bash sandbox runtimes, and RAG search. Pick a topic and start studying instantly—no signup needed!
+            Built for Networking and Internet Technology (NIT) in Rwanda and founded by Uwizeyimana Joshua. Free syllabus textbooks, interactive Packet Tracer labs, Bash runtimes, and timed exams!
           </p>
 
           {/* 2. SEARCH EVERYTHING */}
@@ -409,7 +409,7 @@ export default function Dashboard({ progress, documents, onNavigateToSection, on
               Interactive NIT AI & Cisco Lab Mentor
             </h3>
             <p className="text-xs leading-relaxed text-gray-400">
-              Ask questions on complex IT materials or paste networking parameters. NETECH's NIT AI provides detailed code breakdowns, orthographic explanations, and even provides responses in <strong>Kinyarwanda or super-simple analogies</strong>.
+              Ask questions on complex IT materials or paste networking parameters. JoshNet Elearning's NIT AI provides detailed code breakdowns, orthographic explanations, and even provides responses in <strong>Kinyarwanda or super-simple analogies</strong>.
             </p>
 
             <div className="flex flex-wrap gap-2 pt-2">
@@ -439,11 +439,11 @@ export default function Dashboard({ progress, documents, onNavigateToSection, on
               darkMode ? 'bg-slate-950/80 border-white/5' : 'bg-white border-teal-200 shadow-md'
             }`}>
               <div className="flex items-center justify-between border-b border-white/5 pb-2 text-[10px] text-gray-500 font-mono">
-                <span>net-learn-cognitive-terminal</span>
+                <span>joshnet-cognitive-terminal</span>
                 <span className="text-teal-400 font-bold">● ACTIVE</span>
               </div>
               <p className={`font-mono text-xs leading-relaxed ${darkMode ? 'text-teal-300' : 'text-teal-900'}`}>
-                <span className="text-teal-500">guest@netlearn:~$</span> explain OSPF cost metrics<br />
+                <span className="text-teal-500">guest@joshnet:~$</span> explain OSPF cost metrics<br />
                 <span className="text-gray-400">&gt; OSPF uses "Cost" as routing metric based on link bandwidth. Cost = Reference Bandwidth (100 Mbps) / Link Bandwidth. A higher speed port has lower cost!</span>
               </p>
               
@@ -584,7 +584,7 @@ export default function Dashboard({ progress, documents, onNavigateToSection, on
             What Students & Educators Say
           </h3>
           <p className="text-xs text-gray-400">
-            Real feedback from tech scholars who upgraded their study methods with NETECH.
+            Real feedback from NIT &amp; tech scholars who upgraded their study methods with JoshNet Elearning.
           </p>
         </div>
 
@@ -644,16 +644,16 @@ export default function Dashboard({ progress, documents, onNavigateToSection, on
             <div className="flex items-center justify-center sm:justify-start gap-2">
               <img 
                 src={netLearnLogo} 
-                alt="NETECH Logo" 
+                alt="JoshNet Elearning Logo" 
                 className="w-8 h-8 object-contain rounded-lg shadow-sm border border-emerald-500/20"
                 referrerPolicy="no-referrer"
                 onError={(e) => { e.currentTarget.src = '/logo.jpg'; }}
               />
               <span className={`font-display font-black text-base ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                NETECH
+                JoshNet Elearning
               </span>
             </div>
-            <p className="text-[11px] text-gray-500 font-medium">Interactive Learning Platform. Professional IT, Linux & Python Study Suite.</p>
+            <p className="text-[11px] text-gray-500 font-medium">Networking &amp; Internet Technology (NIT) Rwanda • Founded by Uwizeyimana Joshua.</p>
           </div>
 
           <div className="flex flex-wrap items-center justify-center gap-6 text-[11px] font-bold">
@@ -670,7 +670,7 @@ export default function Dashboard({ progress, documents, onNavigateToSection, on
         </div>
 
         <div className="text-[10px] text-gray-500 flex flex-col sm:flex-row items-center justify-between gap-4 max-w-6xl mx-auto border-t border-gray-200/5 dark:border-white/5 pt-4">
-          <p>© {new Date().getFullYear()} NETECH. Inspired by W3Schools visual and ergonomic layouts. All Rights Reserved.</p>
+          <p>© {new Date().getFullYear()} JoshNet Elearning • Founded by Uwizeyimana Joshua (NIT Rwanda). All Rights Reserved.</p>
           <div className="flex items-center gap-3">
             <span className="px-2 py-0.5 rounded bg-teal-500/10 text-teal-400 font-mono font-bold">v2.5_ACTIVE</span>
             <span className="text-gray-400 font-semibold">Security Shield Enabled</span>

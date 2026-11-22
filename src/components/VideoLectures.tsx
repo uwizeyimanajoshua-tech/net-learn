@@ -162,7 +162,7 @@ const DEFAULT_LECTURES: VideoLecture[] = [
     ],
     keyCommands: [
       { label: 'Install AD DS & DNS Roles via PowerShell', command: 'Install-WindowsFeature -Name AD-Domain-Services, DNS -IncludeManagementTools', note: 'Installs AD DS role and admin tools' },
-      { label: 'Create new Forest Root Domain', command: 'Install-ADDSForest -DomainName "netech.local" -InstallDns:$true', note: 'Promotes server to Primary DC' },
+      { label: 'Create new Forest Root Domain', command: 'Install-ADDSForest -DomainName "joshnet.local" -InstallDns:$true', note: 'Promotes server to Primary DC' },
       { label: 'Force immediate GPO refresh', command: 'gpupdate /force', note: 'Applies new group policies immediately' }
     ],
     takeaways: [
@@ -444,10 +444,10 @@ export default function VideoLectures({ darkMode = false, onNavigateToTab, user 
       category: newCategory,
       duration: newDuration || '15:00',
       durationSec: 900,
-      instructor: newInstructor || 'NETECH Faculty',
+      instructor: newInstructor || 'JoshNet Elearning Faculty',
       views: '100 views',
       youtubeId: cleanId,
-      description: newDescription || 'Academic lecture session at NETECH Academy.',
+      description: newDescription || 'Academic lecture session at JoshNet Elearning (NIT Rwanda).',
       chapters: [
         { time: '00:00', seconds: 0, title: 'Lecture Introduction' },
         { time: '05:00', seconds: 300, title: 'Main Topic & Core Concepts' },

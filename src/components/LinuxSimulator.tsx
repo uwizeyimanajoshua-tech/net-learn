@@ -117,7 +117,7 @@ function createDefaultFilesystem(): FileNode {
             group: 'root',
             size: 15,
             mtime: 'Sep 29 07:00',
-            content: 'netlearn-srv01\n'
+            content: 'joshnet-srv01\n'
           },
           hosts: {
             name: 'hosts',
@@ -127,7 +127,7 @@ function createDefaultFilesystem(): FileNode {
             group: 'root',
             size: 180,
             mtime: 'Sep 29 07:00',
-            content: '127.0.0.1\tlocalhost\n127.0.1.1\tnetlearn-srv01\n192.168.1.1\tgateway.corp.local\n192.168.1.100\tdns.corp.local\n'
+            content: '127.0.0.1\tlocalhost\n127.0.1.1\tjoshnet-srv01\n192.168.1.1\tgateway.corp.local\n192.168.1.100\tdns.corp.local\n'
           },
           passwd: {
             name: 'passwd',
@@ -156,7 +156,7 @@ function createDefaultFilesystem(): FileNode {
                 group: 'root',
                 size: 640,
                 mtime: 'Sep 29 07:00',
-                content: 'user nginx;\nworker_processes auto;\npid /run/nginx.pid;\n\nevents {\n    worker_connections 1024;\n}\n\nhttp {\n    sendfile on;\n    tcp_nopush on;\n    types_hash_max_size 2048;\n\n    server {\n        listen 80 default_server;\n        listen [::]:80 default_server;\n        server_name netlearn.internal;\n        root /var/www/html;\n        index index.html;\n\n        location / {\n            try_files $uri $uri/ =404;\n        }\n    }\n}\n'
+                content: 'user nginx;\nworker_processes auto;\npid /run/nginx.pid;\n\nevents {\n    worker_connections 1024;\n}\n\nhttp {\n    sendfile on;\n    tcp_nopush on;\n    types_hash_max_size 2048;\n\n    server {\n        listen 80 default_server;\n        listen [::]:80 default_server;\n        server_name joshnet.internal;\n        root /var/www/html;\n        index index.html;\n\n        location / {\n            try_files $uri $uri/ =404;\n        }\n    }\n}\n'
               }
             }
           }
@@ -188,13 +188,13 @@ function createDefaultFilesystem(): FileNode {
                 group: 'adm',
                 size: 2480,
                 mtime: 'Sep 29 07:22',
-                content: `Sep 29 07:15:01 netlearn-srv01 CRON[1204]: (root) CMD (test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.daily ))
-Sep 29 07:18:22 netlearn-srv01 systemd[1]: Started Nginx High-Performance Web Server.
-Sep 29 07:22:45 netlearn-srv01 sshd[1450]: Accepted publickey for student from 192.168.1.55 port 54220 ssh2
-Sep 29 07:35:10 netlearn-srv01 kernel: [ 45.221] eth0: link up, 1000Mbps, full-duplex, lpa 0x05E1
-Sep 29 07:40:02 netlearn-srv01 systemd[1]: Starting Network Time Synchronization...
-Sep 29 07:40:05 netlearn-srv01 systemd[1]: Started Network Time Synchronization.
-Sep 29 07:44:11 netlearn-srv01 sudo: student : TTY=pts/0 ; PWD=/home/student ; USER=root ; COMMAND=/bin/systemctl status nginx`
+                content: `Sep 29 07:15:01 joshnet-srv01 CRON[1204]: (root) CMD (test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.daily ))
+Sep 29 07:18:22 joshnet-srv01 systemd[1]: Started Nginx High-Performance Web Server.
+Sep 29 07:22:45 joshnet-srv01 sshd[1450]: Accepted publickey for student from 192.168.1.55 port 54220 ssh2
+Sep 29 07:35:10 joshnet-srv01 kernel: [ 45.221] eth0: link up, 1000Mbps, full-duplex, lpa 0x05E1
+Sep 29 07:40:02 joshnet-srv01 systemd[1]: Starting Network Time Synchronization...
+Sep 29 07:40:05 joshnet-srv01 systemd[1]: Started Network Time Synchronization.
+Sep 29 07:44:11 joshnet-srv01 sudo: student : TTY=pts/0 ; PWD=/home/student ; USER=root ; COMMAND=/bin/systemctl status nginx`
               },
               nginx: {
                 name: 'nginx',
@@ -217,7 +217,7 @@ Sep 29 07:44:11 netlearn-srv01 sudo: student : TTY=pts/0 ; PWD=/home/student ; U
 192.168.1.60 - - [29/Sep/2026:07:21:04 +0000] "GET /api/v1/health HTTP/1.1" 200 128 "-" "curl/8.5.0"
 192.168.1.99 - - [29/Sep/2026:07:22:31 +0000] "GET /admin/config.php HTTP/1.1" 404 196 "-" "Python-urllib/3.10"
 192.168.1.99 - - [29/Sep/2026:07:22:35 +0000] "GET /wp-login.php HTTP/1.1" 404 196 "-" "Python-urllib/3.10"
-192.168.1.55 - - [29/Sep/2026:07:25:50 +0000] "GET /styles.css HTTP/1.1" 200 8920 "http://netlearn.internal/" "Mozilla/5.0"
+192.168.1.55 - - [29/Sep/2026:07:25:50 +0000] "GET /styles.css HTTP/1.1" 200 8920 "http://joshnet.internal/" "Mozilla/5.0"
 192.168.1.88 - - [29/Sep/2026:07:27:14 +0000] "POST /api/telemetry HTTP/1.1" 201 44 "-" "IoT-Sensor-ESP32"
 192.168.1.99 - - [29/Sep/2026:07:28:02 +0000] "GET /.env HTTP/1.1" 404 196 "-" "Python-urllib/3.10"`
                   },
@@ -229,9 +229,9 @@ Sep 29 07:44:11 netlearn-srv01 sudo: student : TTY=pts/0 ; PWD=/home/student ; U
                     group: 'adm',
                     size: 620,
                     mtime: 'Sep 29 07:28',
-                    content: `2026/09/29 07:22:31 [error] 1413#1413: *14 open() "/var/www/html/admin/config.php" failed (2: No such file or directory), client: 192.168.1.99, server: netlearn.internal
-2026/09/29 07:22:35 [error] 1413#1413: *15 open() "/var/www/html/wp-login.php" failed (2: No such file or directory), client: 192.168.1.99, server: netlearn.internal
-2026/09/29 07:28:02 [error] 1413#1413: *18 open() "/var/www/html/.env" failed (2: No such file or directory), client: 192.168.1.99, server: netlearn.internal`
+                    content: `2026/09/29 07:22:31 [error] 1413#1413: *14 open() "/var/www/html/admin/config.php" failed (2: No such file or directory), client: 192.168.1.99, server: joshnet.internal
+2026/09/29 07:22:35 [error] 1413#1413: *15 open() "/var/www/html/wp-login.php" failed (2: No such file or directory), client: 192.168.1.99, server: joshnet.internal
+2026/09/29 07:28:02 [error] 1413#1413: *18 open() "/var/www/html/.env" failed (2: No such file or directory), client: 192.168.1.99, server: joshnet.internal`
                   }
                 }
               }
@@ -263,7 +263,7 @@ Sep 29 07:44:11 netlearn-srv01 sudo: student : TTY=pts/0 ; PWD=/home/student ; U
                     group: 'root',
                     size: 340,
                     mtime: 'Sep 29 07:00',
-                    content: '<!DOCTYPE html>\n<html>\n<head><title>NETECH Enterprise Web Node</title></head>\n<body>\n<h1>Nginx Web Server is Active</h1>\n<p>Ubuntu 24.04 LTS host node 01</p>\n</body>\n</html>'
+                    content: '<!DOCTYPE html>\n<html>\n<head><title>JoshNet Elearning Enterprise Web Node</title></head>\n<body>\n<h1>Nginx Web Server is Active</h1>\n<p>Ubuntu 24.04 LTS host node 01</p>\n</body>\n</html>'
                   }
                 }
               }
@@ -298,7 +298,7 @@ Sep 29 07:44:11 netlearn-srv01 sudo: student : TTY=pts/0 ; PWD=/home/student ; U
                 size: 512,
                 mtime: 'Sep 29 07:00',
                 content: `========================================================
- Welcome to the NETECH Linux OS Terminal Simulator!
+ Welcome to the JoshNet Elearning Linux OS Terminal Simulator!
  Operating System: Ubuntu 24.04 LTS (x86_64 Linux 6.8)
 ========================================================
 
@@ -380,7 +380,7 @@ print("[DIAGNOSTIC]: All systems operational and within standard tolerances.")
                     group: 'student',
                     size: 195,
                     mtime: 'Sep 29 07:10',
-                    content: '{\n  "environment": "production",\n  "node": "netlearn-01",\n  "port": 8080,\n  "max_clients": 500,\n  "ssl_enabled": true\n}\n'
+                    content: '{\n  "environment": "production",\n  "node": "joshnet-01",\n  "port": 8080,\n  "max_clients": 500,\n  "ssl_enabled": true\n}\n'
                   },
                   'README.md': {
                     name: 'README.md',
@@ -440,7 +440,7 @@ export default function LinuxSimulator({
     {
       id: 'init-1',
       command: 'uname -a',
-      output: 'Linux netlearn-srv01 6.8.0-31-generic #31-Ubuntu SMP PREEMPT_DYNAMIC x86_64 GNU/Linux',
+      output: 'Linux joshnet-srv01 6.8.0-31-generic #31-Ubuntu SMP PREEMPT_DYNAMIC x86_64 GNU/Linux',
       user: 'student',
       cwd: '/home/student',
       timestamp: '07:20:00'
@@ -448,7 +448,7 @@ export default function LinuxSimulator({
     {
       id: 'init-2',
       command: 'cat /home/student/welcome.txt',
-      output: `========================================================\n Welcome to the NETECH Linux OS Terminal Simulator!\n Operating System: Ubuntu 24.04 LTS (x86_64 Linux 6.8)\n========================================================\nType 'help' to inspect available system commands, or click any Lab Scenario below to start guided tasks!`,
+      output: `========================================================\n Welcome to the JoshNet Elearning Linux OS Terminal Simulator!\n Operating System: Ubuntu 24.04 LTS (x86_64 Linux 6.8)\n========================================================\nType 'help' to inspect available system commands, or click any Lab Scenario below to start guided tasks!`,
       user: 'student',
       cwd: '/home/student',
       timestamp: '07:20:01'
@@ -752,7 +752,7 @@ export default function LinuxSimulator({
 
       case 'help': {
         return {
-          output: `NETECH Linux Terminal Emulator (Ubuntu 24.04.1 LTS)
+          output: `JoshNet Elearning Linux Terminal Emulator (Ubuntu 24.04.1 LTS)
 Common Available Commands:
   • Navigation & FS : ls, cd, pwd, cat, mkdir, touch, rm, cp, mv, echo, tree
   • Inspection & Logs: grep, head, tail, wc, nano, chmod, chown
@@ -779,7 +779,7 @@ Common Available Commands:
       }
 
       case 'hostname': {
-        return { output: 'netlearn-srv01' };
+        return { output: 'joshnet-srv01' };
       }
 
       case 'date': {
@@ -792,7 +792,7 @@ Common Available Commands:
 
       case 'uname': {
         if (args.includes('-a')) {
-          return { output: 'Linux netlearn-srv01 6.8.0-31-generic #31-Ubuntu SMP PREEMPT_DYNAMIC x86_64 GNU/Linux' };
+          return { output: 'Linux joshnet-srv01 6.8.0-31-generic #31-Ubuntu SMP PREEMPT_DYNAMIC x86_64 GNU/Linux' };
         }
         if (args.includes('-r')) return { output: '6.8.0-31-generic' };
         if (args.includes('-m')) return { output: 'x86_64' };
@@ -1294,10 +1294,10 @@ Processing triggers for man-db...`
       case 'neofetch': {
         return {
           output: `
-       _,met$$$$$gg.          student@netlearn-srv01
+       _,met$$$$$gg.          student@joshnet-srv01
     ,g$$$$$$$$$$$$$$$P.       ----------------------
   ,g$$P"        """Y$$.".     OS: Ubuntu 24.04.1 LTS x86_64
- ,$$P'              \`$$$.    Host: NetLearn Cloud Hypervisor
+ ,$$P'              \`$$$.    Host: JoshNet Cloud Hypervisor
 ',$$P       ,ggs.     \`$$b:  Kernel: 6.8.0-31-generic
 \`d$$'     ,$P"'   .    $$$   Uptime: 4 days, 2 hours, 14 mins
  $$P      d$'     ,    $$P    Packages: ${installedPackages.length} (dpkg)
@@ -1507,10 +1507,10 @@ Processing triggers for man-db...`
           <div className="flex items-center gap-2 pl-2">
             <Terminal className="w-4 h-4 text-emerald-400" />
             <span className="font-mono text-xs font-bold text-gray-200">
-              NETECH Linux OS Emulator (Ubuntu 24.04 LTS)
+              JoshNet Elearning Linux OS Emulator (Ubuntu 24.04 LTS)
             </span>
             <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-500/20 text-emerald-400 font-semibold hidden sm:inline-block">
-              ● Active Node: netlearn-srv01
+              ● Active Node: joshnet-srv01
             </span>
           </div>
         </div>
@@ -1629,7 +1629,7 @@ Processing triggers for man-db...`
                 {item.command && (
                   <div className="flex items-center gap-2 text-gray-400">
                     <span className="text-emerald-400 font-bold">
-                      {item.user}@netlearn-linux
+                      {item.user}@joshnet-linux
                     </span>
                     <span className="text-gray-500">:</span>
                     <span className="text-cyan-400 font-semibold">
@@ -1652,7 +1652,7 @@ Processing triggers for man-db...`
             {/* Live active command input row */}
             <div className="flex items-center gap-2 pt-1">
               <span className="text-emerald-400 font-bold">
-                {currentUser}@netlearn-linux
+                {currentUser}@joshnet-linux
               </span>
               <span className="text-gray-500">:</span>
               <span className="text-cyan-400 font-semibold">

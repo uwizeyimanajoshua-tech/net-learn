@@ -41,7 +41,7 @@ export default function LandingPage({ onEnterApp, darkMode, setDarkMode, onOpenA
               <Sparkles className="w-5 h-5" id="brand-logo" />
             </div>
             <span className="font-display font-bold text-xl tracking-tight bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-400 bg-clip-text text-transparent">
-              NETECH Academy
+              JoshNet Elearning
             </span>
           </div>
           
@@ -135,7 +135,7 @@ export default function LandingPage({ onEnterApp, darkMode, setDarkMode, onOpenA
               <span className="w-3 h-3 rounded-full bg-red-500" />
               <span className="w-3 h-3 rounded-full bg-yellow-500" />
               <span className="w-3 h-3 rounded-full bg-green-500" />
-              <span className="ml-2 font-mono text-xs text-gray-500">nexalearn-live-interface_v1.0.sh</span>
+              <span className="ml-2 font-mono text-xs text-gray-500">joshnet-live-interface_v1.0.sh</span>
             </div>
             <div className="flex bg-gray-800/40 p-1 rounded-xl border border-gray-700/25">
               <button
@@ -245,7 +245,7 @@ export default function LandingPage({ onEnterApp, darkMode, setDarkMode, onOpenA
         {/* Feature Grid Section */}
         <div id="features-anchor" className="scroll-mt-20">
           <div className="text-center max-w-3xl mx-auto mb-16">
-            <h2 className="font-display font-bold text-3xl sm:text-4xl mb-4">What makes NexaLearn different?</h2>
+            <h2 className="font-display font-bold text-3xl sm:text-4xl mb-4">What makes JoshNet Elearning different?</h2>
             <p className="text-gray-400 text-sm sm:text-base">An educational hub loaded with specialized tools to streamline exam revisions, system operations, and practical setups.</p>
           </div>
 
@@ -304,7 +304,7 @@ export default function LandingPage({ onEnterApp, darkMode, setDarkMode, onOpenA
             className="px-8 py-3.5 rounded-2xl font-display font-semibold text-sm bg-indigo-600 hover:bg-indigo-500 text-white shadow-xl hover:shadow-indigo-500/20 hover:scale-103 active:scale-97 transition-all flex items-center gap-2.5 mx-auto"
             id="bottom-cta-enter"
           >
-            Enter NETECH Workspace <ArrowRight className="w-4 h-4" />
+            Enter JoshNet Elearning <ArrowRight className="w-4 h-4" />
           </button>
         </div>
       </main>
@@ -314,10 +314,10 @@ export default function LandingPage({ onEnterApp, darkMode, setDarkMode, onOpenA
         <div className="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-6">
           <div className="flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-indigo-400" />
-            <span className="font-display font-semibold text-sm text-gray-400">NETECH Academy Platform</span>
+            <span className="font-display font-semibold text-sm text-gray-400">JoshNet Elearning Platform • NIT Rwanda</span>
           </div>
           <span className="text-xs text-gray-500">
-            &copy; 2026 NETECH. Crafted as a high-fidelity educational companion. All rights reserved.
+            &copy; 2026 JoshNet Elearning. Founded by Uwizeyimana Joshua. All rights reserved.
           </span>
         </div>
       </footer>

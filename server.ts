@@ -148,13 +148,14 @@ app.get('/robots.txt', (req, res) => {
   const isLocal = reqHost.includes('localhost') || reqHost.includes('127.0.0.1');
   const origin = isLocal ? ((req.headers['x-forwarded-proto'] || req.protocol) + '://' + reqHost) : 'https://net-learn-psi.vercel.app';
 
-  const content = `# robots.txt for NET LEARN / NETECH Platform
+  const content = `# robots.txt for JoshNet Elearning (JoshNet) - Networking & Internet Technology (NIT) Rwanda
 User-agent: *
 Allow: /
 Allow: /?tab=*
 Allow: /?category=*
 Allow: /api/documents
 Allow: /sitemap.xml
+Allow: /opensearch.xml
 Disallow: /api/auth/
 Disallow: /api/chats/
 Disallow: /api/progress/
@@ -1120,7 +1121,7 @@ app.post('/api/auth/register', (req, res) => {
 
   const token = `jwt_${newUser.id}_${Date.now()}`;
   return res.json({
-    message: `Account created successfully! Welcome to NETECH, ${newUser.username}.`,
+    message: `Account created successfully! Welcome to JoshNet Elearning, ${newUser.username}.`,
     token,
     user: {
       id: newUser.id,
@@ -3118,13 +3119,13 @@ app.post('/api/chats/:id/message', async (req, res) => {
         `# Install AD DS role and administration tools\n` +
         `Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools\n\n` +
         `# Promote server to new Forest Domain Controller\n` +
-        `Install-ADDSForest -DomainName "netech.local" -InstallDns:$true\n\n` +
+        `Install-ADDSForest -DomainName "joshnet.local" -InstallDns:$true\n\n` +
         `# Verify active Active Directory services\n` +
         `Get-Service -Name "NTDS", "DNS", "ADWS"\n` +
         `\`\`\`\n\n` +
         `#### Verification Steps\n` +
         `- Run \`dcdiag /v\` to test directory replication and DNS SRV records.\n` +
-        `- Test DNS lookups using \`Resolve-DnsName -Name netech.local\`.`;
+        `- Test DNS lookups using \`Resolve-DnsName -Name joshnet.local\`.`;
     }
 
     // Priority 4: Linux Systems
@@ -3214,7 +3215,7 @@ app.post('/api/chats/:id/message', async (req, res) => {
       return `${m.sender === 'user' ? 'User' : 'Assistant'}: ${m.text}`;
     }).join('\n');
 
-    const systemInstruction = `You are NIT AI, a distinguished Senior Technical Education Mentor and Certification Examiner at NETECH Academy. 
+    const systemInstruction = `You are NIT AI, a distinguished Senior Technical Education Mentor and Certification Examiner at JoshNet Elearning (Networking and Internet Technology - NIT in Rwanda, founded by Uwizeyimana Joshua). 
 Your goal is to guide students, provide precise answers to technical questions, and explain engineering and computer science concepts thoroughly.
 Always provide clear, thorough, and structured explanations with syntax-highlighted code blocks, command sequences, and real-world troubleshooting steps.
 
@@ -3330,7 +3331,7 @@ app.post('/api/ai/teacher', async (req, res) => {
 
   if (userId) db.incrementAiUsage(userId);
 
-  let systemPrompt = `You are NexaLearn AI, an elite Educational Technical Trainer.
+  let systemPrompt = `You are JoshNet Elearning AI, an elite Educational Technical Trainer for Networking and Internet Technology (NIT) in Rwanda, founded by Uwizeyimana Joshua.
   You specialize in creating practical simulations, packet tracer labs, and custom simplified explanations.`;
 
   let prompt = '';
@@ -3354,14 +3355,14 @@ app.post('/api/ai/teacher', async (req, res) => {
     // Generate high quality predefined responses
     let answer = '';
     if (action === 'kinyarwanda') {
-      answer = `### NexaLearn AI Kinyarwanda Tutorial: **${topic}**\n\nMuraho! Reka dusobanure **${topic}** mu buryo bworoshye cyane.\n\n` +
+      answer = `### JoshNet Elearning AI Kinyarwanda Tutorial: **${topic}**\n\nMuraho! Reka dusobanure **${topic}** mu buryo bworoshye cyane.\n\n` +
         `Ubusanzwe, ibi bikoreshwa cyane muri mudasobwa no mu muvuduko w'amakuru (network speed).\n\n` +
         `- **Ibyingenzi ugomba kumenya:**\n` +
         `  1. Amakuru agenda mu buryo bw'udupfunyika twitwa *packets*.\n` +
         `  2. Ibikoresho (devices) bihuza imiyoboro bitwa *routers* na *switches*.\n\n` +
         `Ese urifuza ko nguha ingero zifatika (practical examples) z'ukuntu ibi babishyira mu bikorwa muri Packet Tracer?`;
     } else if (action === 'simple') {
-      answer = `### NexaLearn AI Easy-Peasy Guide: **${topic}**\n\n` +
+      answer = `### JoshNet Elearning AI Easy-Peasy Guide: **${topic}**\n\n` +
         `Imagine **${topic}** is like a mail delivery service inside a giant school!\n\n` +
         `- Instead of letters, we have small packets of data (like cat videos or voice messages).\n` +
         `- Instead of mail carriers, we have smart machines called **Routers** that look at envelopes and decide the fastest path to deliver them.\n` +
@@ -5085,7 +5086,7 @@ async function startServer() {
     }
 
     const server = app.listen(PORT, '0.0.0.0', () => {
-      console.log(`NexaLearn AI Server running on http://0.0.0.0:${PORT}`);
+      console.log(`JoshNet Elearning Server running on http://0.0.0.0:${PORT}`);
     });
     server.on('error', (err: any) => {
       if (err?.code === 'EADDRINUSE') {
