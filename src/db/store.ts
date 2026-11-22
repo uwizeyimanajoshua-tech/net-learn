@@ -958,11 +958,16 @@ export const db = {
     return examId ? all.filter(s => s.examId === examId) : all;
   },
   getExamSubmissionByUser: (examId: string, userId: string) =>
-    (loadDB().examSubmissions || []).find(s => s.examId === examId && s.userId === userId),
+    (loadDB().examSubmissions || []).find(
+      s => s.examId === examId && s.userId === userId && s.sourceType !== 'practice_quiz'
+    ),
   createExamSubmission: async (sub: ExamSubmission) => {
     const data = loadDB();
     if (!data.examSubmissions) data.examSubmissions = [];
-    const existingIdx = data.examSubmissions.findIndex(s => s.examId === sub.examId && s.userId === sub.userId);
+    const existingIdx = data.examSubmissions.findIndex(s =>
+      s.id === sub.id ||
+      (sub.sourceType !== 'practice_quiz' && s.sourceType !== 'practice_quiz' && s.examId === sub.examId && s.userId === sub.userId)
+    );
     if (existingIdx !== -1) {
       data.examSubmissions[existingIdx] = sub;
     } else {

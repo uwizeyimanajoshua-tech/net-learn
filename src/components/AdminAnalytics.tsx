@@ -1,17 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Users, FileText, Database, Layers, Trash2, ArrowUpRight, BarChart3, Star, AlertCircle, X, RefreshCw } from 'lucide-react';
-import { User, Document } from '../types.js';
+import { Shield, Users, FileText, Database, Layers, Trash2, AlertCircle, X, RefreshCw, ClipboardList, ChevronDown, ChevronUp, Search } from 'lucide-react';
+import { User, Document, ExamSubmission } from '../types.js';
 
 interface AdminAnalyticsProps {
   userId: string;
+  userRole?: string;
+  userEmail?: string;
   documents: Document[];
   onRefreshDocs: () => void;
   darkMode: boolean;
 }
 
-export default function AdminAnalytics({ userId, documents, onRefreshDocs, darkMode }: AdminAnalyticsProps) {
+export default function AdminAnalytics({ userId, userRole, userEmail, documents, onRefreshDocs, darkMode }: AdminAnalyticsProps) {
   const [users, setUsers] = useState<User[]>([]);
   const [analytics, setAnalytics] = useState<any>(null);
+  const [submissions, setSubmissions] = useState<ExamSubmission[]>([]);
+  const [submissionSearch, setSubmissionSearch] = useState('');
+  const [expandedSubId, setExpandedSubId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
@@ -47,10 +52,48 @@ export default function AdminAnalytics({ userId, documents, onRefreshDocs, darkM
       if (analyticRes.ok && analyticData.analytics) {
         setAnalytics(analyticData.analytics);
       }
+
+      // Load all submitted exam & quiz answers
+      const subRes = await fetch(
+        `/api/admin/submissions?userId=${encodeURIComponent(userId)}&userEmail=${encodeURIComponent(userEmail || '')}`,
+        {
+          headers: {
+            'x-user-id': userId || '',
+            'x-user-email': userEmail || '',
+            'x-user-role': userRole || 'admin'
+          }
+        }
+      );
+      const subData = await subRes.json();
+      if (subRes.ok && Array.isArray(subData.submissions)) {
+        setSubmissions(subData.submissions);
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to sync administrator statistics');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDeleteSubmission = async (subId: string) => {
+    try {
+      const res = await fetch(
+        `/api/admin/submissions/${subId}?userId=${encodeURIComponent(userId)}&userEmail=${encodeURIComponent(userEmail || '')}`,
+        {
+          method: 'DELETE',
+          headers: {
+            'x-user-id': userId || '',
+            'x-user-email': userEmail || '',
+            'x-user-role': userRole || 'admin'
+          }
+        }
+      );
+      if (res.ok) {
+        setSubmissions(prev => prev.filter(s => s.id !== subId));
+        showSuccess('Submission record deleted.');
+      }
+    } catch (err) {
+      console.error('Error deleting submission:', err);
     }
   };
 
@@ -273,6 +316,184 @@ export default function AdminAnalytics({ userId, documents, onRefreshDocs, darkM
               </div>
             )}
           </div>
+        </div>
+      </div>
+
+      {/* Student Submitted Answers Center (All Official Exams & Practice Quizzes) */}
+      <div
+        id="admin-submitted-answers"
+        className={`p-6 rounded-2xl border ${darkMode ? 'bg-elegant-card border-white/5' : 'bg-white border-gray-100'} shadow-sm space-y-4`}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="font-display font-bold text-lg flex items-center gap-2">
+              <ClipboardList className="w-5 h-5 text-emerald-400" />
+              <span>Student Submitted Answers Center ({submissions.length})</span>
+            </h3>
+            <p className="text-xs text-gray-400">
+              All Official Timed Exam &amp; Practice Quiz answers submitted by students are stored and inspectable here.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={submissionSearch}
+                onChange={e => setSubmissionSearch(e.target.value)}
+                placeholder="Filter by student or exam..."
+                className={`pl-8 pr-3 py-1.5 rounded-xl border text-xs ${
+                  darkMode ? 'bg-black/30 border-white/10 text-white' : 'bg-gray-50 border-gray-200 text-gray-900'
+                }`}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={loadAdminStats}
+              disabled={loading}
+              className="px-3 py-1.5 rounded-xl border border-white/10 text-xs font-bold hover:bg-white/5 cursor-pointer flex items-center gap-1.5"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              <span>Sync Answers</span>
+            </button>
+          </div>
+        </div>
+
+        {successMessage && (
+          <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold">
+            {successMessage}
+          </div>
+        )}
+
+        <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
+          {(() => {
+            const q = submissionSearch.trim().toLowerCase();
+            const filtered = q
+              ? submissions.filter(s =>
+                  (s.username || '').toLowerCase().includes(q) ||
+                  (s.userEmail || '').toLowerCase().includes(q) ||
+                  (s.examTitle || '').toLowerCase().includes(q) ||
+                  (s.category || '').toLowerCase().includes(q)
+                )
+              : submissions;
+
+            if (filtered.length === 0) {
+              return (
+                <div className="p-6 text-center rounded-xl bg-white/5 border border-white/5 text-gray-400 text-xs">
+                  No student answers recorded yet. Once any student completes an exam or quiz, every answer appears here.
+                </div>
+              );
+            }
+
+            return filtered.map(sub => {
+              const isExpanded = expandedSubId === sub.id;
+              const details = sub.answerDetails || [];
+              return (
+                <div
+                  key={sub.id}
+                  className={`p-4 rounded-xl border space-y-3 text-xs ${
+                    darkMode ? 'bg-black/25 border-white/10' : 'bg-gray-50 border-gray-200'
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase ${
+                          sub.sourceType === 'practice_quiz'
+                            ? 'bg-indigo-500/15 text-indigo-400 border border-indigo-500/30'
+                            : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                        }`}>
+                          {sub.sourceType === 'practice_quiz' ? 'Practice Quiz' : 'Official Exam'}
+                        </span>
+                        <span className="font-bold text-sm">{sub.examTitle}</span>
+                        <span className="text-[11px] text-gray-400">({sub.category})</span>
+                      </div>
+                      <div className="text-[11px] font-mono text-gray-400 flex flex-wrap gap-2">
+                        <span className={darkMode ? 'text-gray-200 font-semibold' : 'text-gray-800 font-semibold'}>
+                          {sub.username} {sub.userEmail ? `(${sub.userEmail})` : ''}
+                        </span>
+                        <span>• {new Date(sub.submittedAt).toLocaleString()}</span>
+                        <span>• Tab Violations: <strong className={sub.tabSwitchCount > 0 ? 'text-rose-400' : 'text-emerald-400'}>{sub.tabSwitchCount}</strong></span>
+                        <span>• Mode: {sub.autoSubmitted ? `Auto (${sub.autoSubmitReason})` : 'Manual'}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`px-3 py-1 rounded-xl font-mono font-black ${
+                        sub.passed ? 'bg-emerald-500/15 text-emerald-400' : 'bg-rose-500/15 text-rose-400'
+                      }`}>
+                        {sub.score}/{sub.maxScore} ({sub.percentage}%)
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setExpandedSubId(isExpanded ? null : sub.id)}
+                        className="px-3 py-1.5 rounded-xl border border-indigo-500/30 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 font-bold cursor-pointer flex items-center gap-1"
+                      >
+                        {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                        <span>{isExpanded ? 'Hide Answers' : `Inspect All Answers (${details.length || Object.keys(sub.answers || {}).length})`}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteSubmission(sub.id)}
+                        className="p-1.5 rounded-lg hover:bg-red-500/10 text-red-400 cursor-pointer"
+                        title="Delete submission record"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {isExpanded && (
+                    <div className="pt-3 border-t border-gray-500/20 space-y-2">
+                      {details.length > 0 ? (
+                        details.map((ans, idx) => (
+                          <div
+                            key={`${sub.id}_${ans.questionId}_${idx}`}
+                            className={`p-3 rounded-xl border space-y-1 ${
+                              ans.isCorrect
+                                ? 'bg-emerald-500/5 border-emerald-500/25'
+                                : 'bg-rose-500/5 border-rose-500/25'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="font-bold text-xs">Q{idx + 1}. {ans.question}</p>
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold shrink-0 ${
+                                ans.isCorrect ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
+                              }`}>
+                                {ans.isCorrect ? 'Correct' : 'Incorrect'}
+                              </span>
+                            </div>
+                            <div className="text-[11px] flex flex-wrap gap-x-4 gap-y-1">
+                              <span>
+                                Student Answer:{' '}
+                                <strong className={ans.isCorrect ? 'text-emerald-400' : 'text-rose-400'}>
+                                  {ans.selectedOptionIndex !== null ? `${String.fromCharCode(65 + ans.selectedOptionIndex)}. ` : ''}
+                                  {ans.selectedOptionText}
+                                </strong>
+                              </span>
+                              {!ans.isCorrect && (
+                                <span>
+                                  Correct Answer:{' '}
+                                  <strong className="text-emerald-400">
+                                    {String.fromCharCode(65 + ans.correctOptionIndex)}. {ans.correctOptionText}
+                                  </strong>
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-xs text-gray-400">
+                          Raw Answers Map: <span className="font-mono">{JSON.stringify(sub.answers || {})}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            });
+          })()}
         </div>
       </div>
 

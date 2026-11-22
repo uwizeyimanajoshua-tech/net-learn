@@ -145,15 +145,28 @@ export interface ExamSession {
   updatedAt?: string;
 }
 
+export interface SubmittedAnswerDetail {
+  questionId: string;
+  question: string;
+  options: string[];
+  selectedOptionIndex: number | null;
+  selectedOptionText: string;
+  correctOptionIndex: number;
+  correctOptionText: string;
+  isCorrect: boolean;
+}
+
 export interface ExamSubmission {
   id: string;
   examId: string;
   examTitle: string;
   category: string;
+  sourceType?: 'official_exam' | 'practice_quiz';
   userId: string;
   username: string;
   userEmail: string;
   answers: Record<string, number>;
+  answerDetails?: SubmittedAnswerDetail[];
   score: number;
   maxScore: number;
   percentage: number;

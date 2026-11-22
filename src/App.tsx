@@ -917,6 +917,8 @@ export default function App() {
           {activeTab === 'admin' && user.role === 'admin' && (
             <AdminAnalytics 
               userId={user.id} 
+              userRole={user.role}
+              userEmail={user.email}
               documents={documents} 
               onRefreshDocs={loadUserData} 
               darkMode={darkMode} 

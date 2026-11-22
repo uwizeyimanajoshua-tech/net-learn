@@ -9,7 +9,7 @@ import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { db, sqlClient, syncFromFirestore, syncDocumentsIfStale, syncAppCollectionsIfStale, hasBrokenCurriculumStubs } from './src/db/store.js';
 import { CATEGORIES } from './src/types.js';
-import type { ChatMessage, ChatSession, Document, DocumentSection, AISummary, Quiz, QuizQuestion, Flashcard, OfficialExam, ExamSession, ExamSubmission } from './src/types.js';
+import type { ChatMessage, ChatSession, Document, DocumentSection, AISummary, Quiz, QuizQuestion, Flashcard, OfficialExam, ExamSession, ExamSubmission, SubmittedAnswerDetail } from './src/types.js';
 
 dotenv.config();
 
@@ -3879,6 +3879,34 @@ app.get('/api/quizzes/:id', async (req, res) => {
 // =============================================================
 // OFFICIAL ADMIN-PREPARED EXAMS (TIMED, LOCKED & PROCTORED)
 // =============================================================
+function buildAnswerDetails(
+  questions: Array<{ id?: string; question?: string; options?: string[]; answer?: number }>,
+  answers: Record<string, number>
+): SubmittedAnswerDetail[] {
+  const safeAnswers = answers && typeof answers === 'object' ? answers : {};
+  return (questions || []).map((q, idx) => {
+    const qId = String(q.id || `q_${idx + 1}`);
+    const opts = Array.isArray(q.options) ? q.options : [];
+    const rawSel = safeAnswers[qId];
+    const selectedIndex = typeof rawSel === 'number' && Number.isFinite(rawSel) ? rawSel : null;
+    const correctIndex = typeof q.answer === 'number' && Number.isFinite(q.answer) ? q.answer : 0;
+    return {
+      questionId: qId,
+      question: String(q.question || `Question ${idx + 1}`),
+      options: opts.map((o) => String(o)),
+      selectedOptionIndex: selectedIndex,
+      selectedOptionText:
+        selectedIndex !== null && opts[selectedIndex] !== undefined
+          ? String(opts[selectedIndex])
+          : 'Not answered',
+      correctOptionIndex: correctIndex,
+      correctOptionText:
+        opts[correctIndex] !== undefined ? String(opts[correctIndex]) : 'Option A',
+      isCorrect: selectedIndex !== null && selectedIndex === correctIndex
+    };
+  });
+}
+
 function checkIsExamAdmin(req: express.Request, bodyUserId?: string): boolean {
   const userEmailHeader = String(req.headers['x-user-email'] || '').toLowerCase().trim();
   const bodyEmail = String(req.body?.userEmail || '').toLowerCase().trim();
@@ -3961,10 +3989,12 @@ async function autoExpireExamSessionIfNeeded(exam: OfficialExam, userId: string)
     examId: exam.id,
     examTitle: exam.title,
     category: exam.category,
+    sourceType: 'official_exam',
     userId,
     username: userObj?.username || 'Student',
     userEmail: userObj?.email || '',
     answers: draft,
+    answerDetails: buildAnswerDetails(exam.questions || [], draft),
     score,
     maxScore,
     percentage,
@@ -3998,6 +4028,17 @@ async function autoExpireExamSessionIfNeeded(exam: OfficialExam, userId: string)
   });
 
   return autoSub;
+}
+
+async function finalizeExpiredExamSessions(examFilterId?: string): Promise<void> {
+  const sessions = db.getExamSessions();
+  for (const sess of sessions) {
+    if (sess.status !== 'active') continue;
+    if (examFilterId && sess.examId !== examFilterId) continue;
+    const exam = db.getExamById(sess.examId);
+    if (!exam) continue;
+    await autoExpireExamSessionIfNeeded(exam, sess.userId);
+  }
 }
 
 // 1. GET /api/exams - List official exams tailored to requester role & user account
@@ -4310,8 +4351,16 @@ app.post('/api/exams/:id/start', async (req, res) => {
 });
 
 // 6. POST /api/exams/:id/draft - Persist in-progress answers (protects auto-submit if tab closes)
-app.post('/api/exams/:id/draft', async (req, res) => {
-  const { userId, answers } = req.body || {};
+app.post('/api/exams/:id/draft', express.text({ type: '*/*', limit: '2mb' }), async (req, res) => {
+  let payload: any = req.body;
+  if (typeof payload === 'string') {
+    try {
+      payload = JSON.parse(payload);
+    } catch {
+      payload = {};
+    }
+  }
+  const { userId, answers } = payload || {};
   const uid = String(userId || req.headers['x-user-id'] || '').trim();
   if (!uid) return res.status(400).json({ error: 'Missing userId' });
 
@@ -4395,10 +4444,12 @@ app.post('/api/exams/:id/submit', async (req, res) => {
     examId: exam.id,
     examTitle: exam.title,
     category: exam.category,
+    sourceType: 'official_exam',
     userId: uid,
     username: userObj?.username || String(req.body?.username || 'Student'),
     userEmail: userObj?.email || String(req.body?.userEmail || ''),
     answers: submittedAnswers,
+    answerDetails: buildAnswerDetails(exam.questions || [], submittedAnswers),
     score,
     maxScore,
     percentage,
@@ -4451,14 +4502,29 @@ app.post('/api/exams/:id/submit', async (req, res) => {
   });
 });
 
-// 9. GET /api/exams/:id/submissions - Admin inspects all student scores & violations
+// 9. GET /api/exams/:id/submissions - Admin inspects all student answers, scores & violations
 app.get('/api/exams/:id/submissions', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
   const userId = String(req.query.userId || req.headers['x-user-id'] || '').trim();
   if (!checkIsExamAdmin(req, userId)) {
     return res.status(403).json({ error: 'Permission Denied: Only administrators can view exam submissions.' });
   }
-  try { await syncAppCollectionsIfStale(5000); } catch {}
-  const subs = db.getExamSubmissions(req.params.id);
+  try { await syncAppCollectionsIfStale(0); } catch {}
+  try { await finalizeExpiredExamSessions(req.params.id); } catch {}
+
+  const exam = db.getExamById(req.params.id);
+  const subs = db.getExamSubmissions(req.params.id)
+    .filter(s => s.sourceType !== 'practice_quiz')
+    .map(s => ({
+      ...s,
+      sourceType: s.sourceType || 'official_exam',
+      answerDetails:
+        Array.isArray(s.answerDetails) && s.answerDetails.length > 0
+          ? s.answerDetails
+          : (exam ? buildAnswerDetails(exam.questions || [], s.answers || {}) : [])
+    }))
+    .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+
   res.json({ submissions: subs });
 });
 
@@ -4467,6 +4533,46 @@ app.delete('/api/exams/:id/submissions/:subId', async (req, res) => {
   const userId = String(req.query.userId || req.body?.userId || req.headers['x-user-id'] || '').trim();
   if (!checkIsExamAdmin(req, userId)) {
     return res.status(403).json({ error: 'Permission Denied: Only administrators can reset exam submissions.' });
+  }
+  const ok = await db.deleteExamSubmission(req.params.subId);
+  if (!ok) return res.status(404).json({ error: 'Submission not found.' });
+  res.json({ success: true });
+});
+
+// 11. GET /api/admin/submissions - Admin inspects ALL student answers across Official Exams & Practice Quizzes
+app.get('/api/admin/submissions', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const userId = String(req.query.userId || req.headers['x-user-id'] || '').trim();
+  if (!checkIsExamAdmin(req, userId)) {
+    return res.status(403).json({ error: 'Permission Denied: Only administrators can inspect all student answers.' });
+  }
+  try { await syncAppCollectionsIfStale(0); } catch {}
+  try { await finalizeExpiredExamSessions(); } catch {}
+
+  const allSubs = db.getExamSubmissions()
+    .map(s => {
+      if (Array.isArray(s.answerDetails) && s.answerDetails.length > 0) {
+        return { ...s, sourceType: s.sourceType || 'official_exam' };
+      }
+      const exam = s.sourceType !== 'practice_quiz' ? db.getExamById(s.examId) : undefined;
+      const quiz = !exam ? db.getQuizById(s.examId) : undefined;
+      const qList = exam?.questions || quiz?.questions || [];
+      return {
+        ...s,
+        sourceType: s.sourceType || 'official_exam',
+        answerDetails: qList.length > 0 ? buildAnswerDetails(qList, s.answers || {}) : []
+      };
+    })
+    .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+
+  res.json({ submissions: allSubs });
+});
+
+// 12. DELETE /api/admin/submissions/:subId - Admin deletes/resets any submission record
+app.delete('/api/admin/submissions/:subId', async (req, res) => {
+  const userId = String(req.query.userId || req.body?.userId || req.headers['x-user-id'] || '').trim();
+  if (!checkIsExamAdmin(req, userId)) {
+    return res.status(403).json({ error: 'Permission Denied: Only administrators can delete submissions.' });
   }
   const ok = await db.deleteExamSubmission(req.params.subId);
   if (!ok) return res.status(404).json({ error: 'Submission not found.' });
@@ -4547,10 +4653,73 @@ app.post('/api/ai/questions/practice', async (req, res) => {
   }
 });
 
-// Submit Quiz Results
-app.post('/api/ai/quiz/submit', (req, res) => {
-  const { userId, quizId, score, maxScore, quizTitle, category } = req.body;
+// Submit Quiz Results (logs progress AND persists every student answer for Admin inspection)
+app.post('/api/ai/quiz/submit', async (req, res) => {
+  const {
+    userId,
+    username,
+    userEmail,
+    quizId,
+    score,
+    maxScore,
+    quizTitle,
+    category,
+    answers,
+    questions,
+    timeTakenSeconds
+  } = req.body || {};
   if (!userId || !quizId) return res.status(400).json({ error: 'Missing userId or quizId.' });
+
+  const questionList: any[] = Array.isArray(questions) && questions.length > 0
+    ? questions
+    : (db.getQuizById(quizId)?.questions || []);
+  const submittedAnswers: Record<string, number> =
+    answers && typeof answers === 'object' ? answers : {};
+  const answerDetails = questionList.length > 0
+    ? buildAnswerDetails(questionList, submittedAnswers)
+    : [];
+
+  let computedScore = Number(score);
+  if (!Number.isFinite(computedScore) && answerDetails.length > 0) {
+    computedScore = answerDetails.filter(d => d.isCorrect).length;
+  }
+  if (!Number.isFinite(computedScore)) computedScore = 0;
+
+  const computedMax = Math.max(
+    Number(maxScore) || questionList.length || 1,
+    1
+  );
+  const percentage = Math.round((computedScore / computedMax) * 100);
+  const userObj = db.getUserById(userId);
+  const nowIso = new Date().toISOString();
+
+  const practiceSubmission: ExamSubmission = {
+    id: `qsub_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    examId: String(quizId),
+    examTitle: String(quizTitle || 'AI Practice Assessment'),
+    category: (CATEGORIES.includes(category) ? category : 'Networking') as ExamSubmission['category'],
+    sourceType: 'practice_quiz',
+    userId: String(userId),
+    username: userObj?.username || String(username || 'Student'),
+    userEmail: userObj?.email || String(userEmail || ''),
+    answers: submittedAnswers,
+    answerDetails,
+    score: computedScore,
+    maxScore: computedMax,
+    percentage,
+    passed: percentage >= 50,
+    timeTakenSeconds: Math.max(1, Number(timeTakenSeconds) || 1),
+    tabSwitchCount: 0,
+    autoSubmitted: false,
+    autoSubmitReason: 'manual',
+    submittedAt: nowIso
+  };
+
+  try {
+    await db.createExamSubmission(practiceSubmission);
+  } catch (err) {
+    console.warn('[Quiz Submit] Could not persist practice quiz submission:', err);
+  }
 
   const progress = db.getProgressByUserId(userId);
   const quizScores = progress.quizScores || [];
@@ -4559,9 +4728,9 @@ app.post('/api/ai/quiz/submit', (req, res) => {
     quizId,
     quizTitle,
     category,
-    score,
-    maxScore,
-    date: new Date().toISOString()
+    score: computedScore,
+    maxScore: computedMax,
+    date: nowIso
   });
 
   // Calculate dynamic weak/strong topics based on category scoring!
@@ -4592,7 +4761,11 @@ app.post('/api/ai/quiz/submit', (req, res) => {
     weakTopics: weakTopics.slice(0, 3)
   });
 
-  res.json({ message: 'Quiz scores logged successfully!', progress: db.getProgressByUserId(userId) });
+  res.json({
+    message: 'All answers submitted and logged successfully!',
+    submission: practiceSubmission,
+    progress: db.getProgressByUserId(userId)
+  });
 });
 
 // AI Flashcards Generator Route

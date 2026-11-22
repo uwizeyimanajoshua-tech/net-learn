@@ -2,9 +2,9 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Shield, Lock, Unlock, Clock, Plus, Trash2, Edit, Users, CheckCircle2,
   XCircle, AlertTriangle, Sparkles, Eye, EyeOff, Play, Flag, ChevronRight,
-  ChevronLeft, Ban, Copy, KeyRound, Maximize2, FileCheck2, RefreshCw, Timer
+  ChevronLeft, ChevronDown, ChevronUp, Ban, Copy, KeyRound, Maximize2, FileCheck2, RefreshCw, Timer, ClipboardList
 } from 'lucide-react';
-import { CategoryName, CATEGORIES, OfficialExam, ExamSubmission, QuizQuestion } from '../types.js';
+import { CategoryName, CATEGORIES, OfficialExam, ExamSubmission, QuizQuestion, SubmittedAnswerDetail } from '../types.js';
 
 interface OfficialExamListItem extends Omit<OfficialExam, 'questions'> {
   questions: Array<Omit<QuizQuestion, 'answer' | 'explanation'> & { answer?: number; explanation?: string }>;
@@ -122,6 +122,13 @@ export default function OfficialExamsHub({
   const [submissionsModalExam, setSubmissionsModalExam] = useState<OfficialExamListItem | null>(null);
   const [examSubmissions, setExamSubmissions] = useState<ExamSubmission[]>([]);
   const [loadingSubmissions, setLoadingSubmissions] = useState<boolean>(false);
+  const [expandedSubId, setExpandedSubId] = useState<string | null>(null);
+
+  // Admin All-Submissions Drawer (Official Exams + Practice Quizzes)
+  const [allSubmissionsOpen, setAllSubmissionsOpen] = useState<boolean>(false);
+  const [allSubmissions, setAllSubmissions] = useState<ExamSubmission[]>([]);
+  const [loadingAllSubmissions, setLoadingAllSubmissions] = useState<boolean>(false);
+  const [expandedAllSubId, setExpandedAllSubId] = useState<string | null>(null);
 
   const authHeaders = useCallback(() => ({
     'Content-Type': 'application/json',
@@ -231,18 +238,40 @@ export default function OfficialExamsHub({
     return () => window.clearInterval(timerId);
   }, [activeExam, submitActiveExam]);
 
-  // Sync draft answers periodically while taking exam so timer expiration always captures latest answers
+  // Sync draft answers immediately + on pagehide/beforeunload via sendBeacon so no answer is lost if tab closes
+  const flushDraftToServer = useCallback((examId: string, answersSnapshot: Record<string, number>) => {
+    fetch(`/api/exams/${examId}/draft`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ userId, answers: answersSnapshot })
+    }).catch(() => {});
+  }, [authHeaders, userId]);
+
   useEffect(() => {
     if (!activeExam) return;
-    const syncTimer = window.setTimeout(() => {
-      fetch(`/api/exams/${activeExam.id}/draft`, {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({ userId, answers: activeAnswers })
-      }).catch(() => {});
-    }, 1200);
-    return () => window.clearTimeout(syncTimer);
-  }, [activeAnswers, activeExam, authHeaders, userId]);
+    const flushViaBeacon = () => {
+      const current = activeExamRef.current;
+      if (!current || submittingRef.current) return;
+      const payload = JSON.stringify({ userId, answers: activeAnswersRef.current });
+      if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+        const blob = new Blob([payload], { type: 'application/json' });
+        navigator.sendBeacon(`/api/exams/${current.id}/draft`, blob);
+      } else {
+        fetch(`/api/exams/${current.id}/draft`, {
+          method: 'POST',
+          headers: authHeaders(),
+          body: payload,
+          keepalive: true
+        }).catch(() => {});
+      }
+    };
+    window.addEventListener('pagehide', flushViaBeacon);
+    window.addEventListener('beforeunload', flushViaBeacon);
+    return () => {
+      window.removeEventListener('pagehide', flushViaBeacon);
+      window.removeEventListener('beforeunload', flushViaBeacon);
+    };
+  }, [activeExam, authHeaders, userId]);
 
   // Anti-tab-switch & fullscreen-exit proctoring (strictly according to admin settings)
   useEffect(() => {
@@ -591,6 +620,7 @@ export default function OfficialExamsHub({
 
   const handleOpenSubmissions = async (exam: OfficialExamListItem) => {
     setSubmissionsModalExam(exam);
+    setExpandedSubId(null);
     setLoadingSubmissions(true);
     try {
       const res = await fetch(`/api/exams/${exam.id}/submissions?userId=${encodeURIComponent(userId)}`, {
@@ -605,6 +635,23 @@ export default function OfficialExamsHub({
     }
   };
 
+  const handleOpenAllSubmissions = async () => {
+    setAllSubmissionsOpen(true);
+    setExpandedAllSubId(null);
+    setLoadingAllSubmissions(true);
+    try {
+      const res = await fetch(`/api/admin/submissions?userId=${encodeURIComponent(userId)}&userEmail=${encodeURIComponent(userEmail || '')}`, {
+        headers: authHeaders()
+      });
+      const data = await res.json();
+      setAllSubmissions(Array.isArray(data.submissions) ? data.submissions : []);
+    } catch {
+      setAllSubmissions([]);
+    } finally {
+      setLoadingAllSubmissions(false);
+    }
+  };
+
   const handleResetSubmission = async (examId: string, subId: string) => {
     try {
       const res = await fetch(`/api/exams/${examId}/submissions/${subId}?userId=${encodeURIComponent(userId)}`, {
@@ -613,9 +660,48 @@ export default function OfficialExamsHub({
       });
       if (res.ok) {
         setExamSubmissions(prev => prev.filter(s => s.id !== subId));
+        setAllSubmissions(prev => prev.filter(s => s.id !== subId));
         await fetchExams();
       }
     } catch {}
+  };
+
+  const resolveAnswerRows = (sub: ExamSubmission, fallbackExam?: OfficialExamListItem | null): SubmittedAnswerDetail[] => {
+    if (Array.isArray(sub.answerDetails) && sub.answerDetails.length > 0) {
+      return sub.answerDetails;
+    }
+    const qList = fallbackExam?.questions || [];
+    if (qList.length > 0) {
+      return qList.map((q, idx) => {
+        const sel = sub.answers ? sub.answers[q.id] : undefined;
+        const selectedIndex = typeof sel === 'number' ? sel : null;
+        const correctIndex = typeof q.answer === 'number' ? q.answer : 0;
+        return {
+          questionId: q.id || `q_${idx + 1}`,
+          question: q.question,
+          options: q.options || [],
+          selectedOptionIndex: selectedIndex,
+          selectedOptionText:
+            selectedIndex !== null && q.options?.[selectedIndex] !== undefined
+              ? q.options[selectedIndex]
+              : 'Not answered',
+          correctOptionIndex: correctIndex,
+          correctOptionText:
+            q.options?.[correctIndex] !== undefined ? q.options[correctIndex] : 'Option A',
+          isCorrect: selectedIndex !== null && selectedIndex === correctIndex
+        };
+      });
+    }
+    return Object.entries(sub.answers || {}).map(([qId, sel], idx) => ({
+      questionId: qId,
+      question: `Question ${idx + 1} (${qId})`,
+      options: [],
+      selectedOptionIndex: typeof sel === 'number' ? sel : null,
+      selectedOptionText: typeof sel === 'number' ? `Option ${String.fromCharCode(65 + sel)}` : 'Not answered',
+      correctOptionIndex: 0,
+      correctOptionText: 'Recorded',
+      isCorrect: false
+    }));
   };
 
   const formatClock = (secs: number) => {
@@ -735,7 +821,12 @@ export default function OfficialExamsHub({
                   <button
                     key={oIdx}
                     type="button"
-                    onClick={() => setActiveAnswers(prev => ({ ...prev, [currentQ.id]: oIdx }))}
+                    onClick={() => {
+                      const nextAnswers = { ...activeAnswersRef.current, [currentQ.id]: oIdx };
+                      activeAnswersRef.current = nextAnswers;
+                      setActiveAnswers(nextAnswers);
+                      flushDraftToServer(activeExam.id, nextAnswers);
+                    }}
                     className={`w-full text-left p-4 rounded-xl border text-xs sm:text-sm transition-all cursor-pointer flex items-center gap-3 ${
                       selected
                         ? 'bg-indigo-600/20 border-indigo-500 font-bold text-indigo-300 shadow'
@@ -834,6 +925,13 @@ export default function OfficialExamsHub({
                 }`}
               >
                 All Exams ({exams.length})
+              </button>
+              <button
+                type="button"
+                onClick={handleOpenAllSubmissions}
+                className="px-4 py-2 rounded-xl text-xs font-bold border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-600 hover:text-white cursor-pointer transition-all flex items-center gap-1.5"
+              >
+                <ClipboardList className="w-3.5 h-3.5" /> All Submitted Answers
               </button>
               <button
                 type="button"
@@ -1469,41 +1567,240 @@ export default function OfficialExamsHub({
               ) : examSubmissions.length === 0 ? (
                 <p className="text-xs text-gray-400 text-center py-8">No student has submitted this exam yet.</p>
               ) : (
-                examSubmissions.map(sub => (
-                  <div
-                    key={sub.id}
-                    className={`p-4 rounded-2xl border flex flex-wrap items-center justify-between gap-3 text-xs ${
-                      darkMode ? 'bg-black/30 border-white/10' : 'bg-gray-50 border-gray-200'
-                    }`}
-                  >
-                    <div className="space-y-0.5">
-                      <div className="font-bold text-sm">
-                        {sub.username} {sub.userEmail ? <span className="text-gray-400 font-normal text-xs">({sub.userEmail})</span> : null}
-                      </div>
-                      <div className="text-[11px] font-mono text-gray-400 flex flex-wrap gap-2">
-                        <span>Submitted: {new Date(sub.submittedAt).toLocaleString()}</span>
-                        <span>• Tab Switches: <strong className={sub.tabSwitchCount > 0 ? 'text-rose-400' : 'text-emerald-400'}>{sub.tabSwitchCount}</strong></span>
-                        <span>• Mode: {sub.autoSubmitted ? `Auto (${sub.autoSubmitReason})` : 'Manual'}</span>
-                      </div>
-                    </div>
+                examSubmissions.map(sub => {
+                  const answerRows = resolveAnswerRows(sub, submissionsModalExam);
+                  const isExpanded = expandedSubId === sub.id;
+                  return (
+                    <div
+                      key={sub.id}
+                      className={`p-4 rounded-2xl border space-y-3 text-xs ${
+                        darkMode ? 'bg-black/30 border-white/10' : 'bg-gray-50 border-gray-200'
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="space-y-0.5">
+                          <div className="font-bold text-sm">
+                            {sub.username} {sub.userEmail ? <span className="text-gray-400 font-normal text-xs">({sub.userEmail})</span> : null}
+                          </div>
+                          <div className="text-[11px] font-mono text-gray-400 flex flex-wrap gap-2">
+                            <span>Submitted: {new Date(sub.submittedAt).toLocaleString()}</span>
+                            <span>• Tab Switches: <strong className={sub.tabSwitchCount > 0 ? 'text-rose-400' : 'text-emerald-400'}>{sub.tabSwitchCount}</strong></span>
+                            <span>• Mode: {sub.autoSubmitted ? `Auto (${sub.autoSubmitReason})` : 'Manual'}</span>
+                          </div>
+                        </div>
 
-                    <div className="flex items-center gap-3">
-                      <span className={`px-3 py-1.5 rounded-xl font-mono font-black ${
-                        sub.passed ? 'bg-emerald-500/15 text-emerald-400' : 'bg-rose-500/15 text-rose-400'
-                      }`}>
-                        {sub.score}/{sub.maxScore} ({sub.percentage}%)
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => handleResetSubmission(submissionsModalExam.id, sub.id)}
-                        className="px-3 py-1.5 rounded-xl border border-amber-500/30 text-amber-400 hover:bg-amber-500/15 text-xs font-bold cursor-pointer"
-                        title="Allow student to retake"
-                      >
-                        Reset Attempt
-                      </button>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={`px-3 py-1.5 rounded-xl font-mono font-black ${
+                            sub.passed ? 'bg-emerald-500/15 text-emerald-400' : 'bg-rose-500/15 text-rose-400'
+                          }`}>
+                            {sub.score}/{sub.maxScore} ({sub.percentage}%)
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setExpandedSubId(isExpanded ? null : sub.id)}
+                            className="px-3 py-1.5 rounded-xl border border-indigo-500/30 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 text-xs font-bold cursor-pointer flex items-center gap-1"
+                          >
+                            {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                            <span>{isExpanded ? 'Hide Answers' : `View Answers (${answerRows.length})`}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleResetSubmission(submissionsModalExam.id, sub.id)}
+                            className="px-3 py-1.5 rounded-xl border border-amber-500/30 text-amber-400 hover:bg-amber-500/15 text-xs font-bold cursor-pointer"
+                            title="Allow student to retake"
+                          >
+                            Reset Attempt
+                          </button>
+                        </div>
+                      </div>
+
+                      {isExpanded && (
+                        <div className="pt-3 border-t border-gray-500/20 space-y-2">
+                          {answerRows.length === 0 ? (
+                            <p className="text-xs text-gray-400">No question answers were recorded for this attempt.</p>
+                          ) : (
+                            answerRows.map((ans, qIdx) => (
+                              <div
+                                key={`${sub.id}_${ans.questionId}_${qIdx}`}
+                                className={`p-3 rounded-xl border space-y-1.5 ${
+                                  ans.isCorrect
+                                    ? 'bg-emerald-500/5 border-emerald-500/25'
+                                    : 'bg-rose-500/5 border-rose-500/25'
+                                }`}
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <p className="font-bold text-xs">
+                                    Q{qIdx + 1}. {ans.question}
+                                  </p>
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold shrink-0 ${
+                                    ans.isCorrect ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
+                                  }`}>
+                                    {ans.isCorrect ? 'Correct' : 'Incorrect'}
+                                  </span>
+                                </div>
+                                <div className="text-[11px] flex flex-wrap gap-x-4 gap-y-1">
+                                  <span>
+                                    Student Answer:{' '}
+                                    <strong className={ans.isCorrect ? 'text-emerald-400' : 'text-rose-400'}>
+                                      {ans.selectedOptionIndex !== null ? `${String.fromCharCode(65 + ans.selectedOptionIndex)}. ` : ''}
+                                      {ans.selectedOptionText}
+                                    </strong>
+                                  </span>
+                                  {!ans.isCorrect && (
+                                    <span>
+                                      Correct Answer:{' '}
+                                      <strong className="text-emerald-400">
+                                        {String.fromCharCode(65 + ans.correctOptionIndex)}. {ans.correctOptionText}
+                                      </strong>
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ADMIN ALL SUBMITTED ANSWERS MODAL (OFFICIAL EXAMS & PRACTICE QUIZZES) */}
+      {allSubmissionsOpen && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className={`w-full max-w-4xl max-h-[88vh] rounded-3xl border shadow-2xl flex flex-col overflow-hidden ${
+            darkMode ? 'bg-[#0f1722] border-white/10 text-gray-100' : 'bg-white border-gray-200 text-gray-900'
+          }`}>
+            <div className="p-5 border-b border-gray-500/20 flex items-center justify-between gap-3">
+              <div>
+                <h3 className="font-display font-black text-base flex items-center gap-2">
+                  <ClipboardList className="w-5 h-5 text-emerald-400" />
+                  <span>All Submitted Student Answers (Official Exams &amp; Practice Quizzes)</span>
+                </h3>
+                <p className="text-xs text-gray-400">
+                  Every question-by-question answer submitted across all accounts is stored here for Administrator review.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleOpenAllSubmissions}
+                  className="px-3 py-1.5 rounded-xl border border-gray-500/25 text-xs font-bold cursor-pointer"
+                >
+                  Refresh
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAllSubmissionsOpen(false)}
+                  className="px-3 py-1.5 rounded-xl bg-white/10 text-xs font-bold cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+
+            <div className="p-5 overflow-y-auto flex-1 space-y-3">
+              {loadingAllSubmissions ? (
+                <p className="text-xs text-gray-400 text-center py-8">Loading all student answers...</p>
+              ) : allSubmissions.length === 0 ? (
+                <p className="text-xs text-gray-400 text-center py-8">No student answers submitted yet.</p>
+              ) : (
+                allSubmissions.map(sub => {
+                  const matchedExam = exams.find(e => e.id === sub.examId) || null;
+                  const answerRows = resolveAnswerRows(sub, matchedExam);
+                  const isExpanded = expandedAllSubId === sub.id;
+                  return (
+                    <div
+                      key={sub.id}
+                      className={`p-4 rounded-2xl border space-y-3 text-xs ${
+                        darkMode ? 'bg-black/30 border-white/10' : 'bg-gray-50 border-gray-200'
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase ${
+                              sub.sourceType === 'practice_quiz'
+                                ? 'bg-indigo-500/15 text-indigo-400 border border-indigo-500/30'
+                                : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                            }`}>
+                              {sub.sourceType === 'practice_quiz' ? 'Practice Quiz' : 'Official Exam'}
+                            </span>
+                            <span className="font-bold text-sm">{sub.examTitle}</span>
+                          </div>
+                          <div className="text-[11px] font-mono text-gray-400 flex flex-wrap gap-2">
+                            <span className="text-gray-200 font-semibold">
+                              {sub.username} {sub.userEmail ? `(${sub.userEmail})` : ''}
+                            </span>
+                            <span>• {new Date(sub.submittedAt).toLocaleString()}</span>
+                            <span>• Mode: {sub.autoSubmitted ? `Auto (${sub.autoSubmitReason})` : 'Manual'}</span>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={`px-3 py-1.5 rounded-xl font-mono font-black ${
+                            sub.passed ? 'bg-emerald-500/15 text-emerald-400' : 'bg-rose-500/15 text-rose-400'
+                          }`}>
+                            {sub.score}/{sub.maxScore} ({sub.percentage}%)
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setExpandedAllSubId(isExpanded ? null : sub.id)}
+                            className="px-3 py-1.5 rounded-xl border border-indigo-500/30 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 text-xs font-bold cursor-pointer flex items-center gap-1"
+                          >
+                            {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                            <span>{isExpanded ? 'Hide Answers' : `Inspect Answers (${answerRows.length})`}</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {isExpanded && (
+                        <div className="pt-3 border-t border-gray-500/20 space-y-2">
+                          {answerRows.map((ans, qIdx) => (
+                            <div
+                              key={`${sub.id}_all_${ans.questionId}_${qIdx}`}
+                              className={`p-3 rounded-xl border space-y-1 ${
+                                ans.isCorrect
+                                  ? 'bg-emerald-500/5 border-emerald-500/25'
+                                  : 'bg-rose-500/5 border-rose-500/25'
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <p className="font-bold text-xs">Q{qIdx + 1}. {ans.question}</p>
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold shrink-0 ${
+                                  ans.isCorrect ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
+                                }`}>
+                                  {ans.isCorrect ? 'Correct' : 'Incorrect'}
+                                </span>
+                              </div>
+                              <div className="text-[11px] flex flex-wrap gap-x-4 gap-y-1">
+                                <span>
+                                  Student Answer:{' '}
+                                  <strong className={ans.isCorrect ? 'text-emerald-400' : 'text-rose-400'}>
+                                    {ans.selectedOptionIndex !== null ? `${String.fromCharCode(65 + ans.selectedOptionIndex)}. ` : ''}
+                                    {ans.selectedOptionText}
+                                  </strong>
+                                </span>
+                                {!ans.isCorrect && (
+                                  <span>
+                                    Correct Answer:{' '}
+                                    <strong className="text-emerald-400">
+                                      {String.fromCharCode(65 + ans.correctOptionIndex)}. {ans.correctOptionText}
+                                    </strong>
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
               )}
             </div>
           </div>

@@ -272,17 +272,27 @@ export default function ExamSimulator({
     setQuizFinished(true);
 
     try {
-      // Submit progress log to backend
+      // Submit full question-by-question answers and progress log to backend for Admin review
       const res = await fetch('/api/ai/quiz/submit', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': userId || '',
+          'x-user-email': userEmail || '',
+          'x-user-role': userRole || ''
+        },
         body: JSON.stringify({
           userId,
+          username,
+          userEmail,
           quizId: activeQuiz.id,
           quizTitle: activeQuiz.title,
           category: activeQuiz.category,
           score,
-          maxScore: activeQuiz.questions.length
+          maxScore: activeQuiz.questions.length,
+          answers: selectedAnswers,
+          questions: activeQuiz.questions,
+          timeTakenSeconds: duration
         })
       });
       
@@ -1102,7 +1112,7 @@ export default function ExamSimulator({
                     Assessment Evaluation Complete
                   </h4>
                   <p className="text-xs text-gray-400 mt-0.5">
-                    Your answers were submitted and recorded to your learning record.
+                    All your answers were submitted to the Administrator and logged to your learning record.
                   </p>
                 </div>
 
