@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <OpenSearchDescription xmlns="http://a9.com/-/spec/opensearch/1.1/">
   <ShortName>JoshNet Elearning</ShortName>
-  <Description>Search JoshNet Elearning (JoshNet) — Networking and Internet Technology (NIT) Rwanda courses, notes, and simulators founded by Uwizeyimana Joshua.</Description>
+  <Description>Search JoshNet Elearning — Networking and Internet Technology courses, notes, and simulators founded by Uwizeyimana Joshua.</Description>
   <InputEncoding>UTF-8</InputEncoding>
   <Image width="64" height="64" type="image/jpeg">https://net-learn-psi.vercel.app/logo.jpg</Image>
   <Url type="text/html" method="get" template="https://net-learn-psi.vercel.app/?search={searchTerms}" />

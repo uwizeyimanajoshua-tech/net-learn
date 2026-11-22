@@ -65,9 +65,9 @@ export default function Dashboard({ progress, documents, onNavigateToSection, on
   ];
 
   const testimonials = [
-    { name: 'Joshua K.', role: 'NIT Student (Kigali, Rwanda)', text: 'JoshNet Elearning changed how I prepare for my Networking and Internet Technology (NIT) exams! The NIT AI Packet Tracer labs and interactive flashcards helped me pass my syllabus modules.', rating: 5 },
-    { name: 'Amina U.', role: 'Junior Linux Administrator (Gisenyi)', text: 'W3Schools has always been my go-to for reference, but JoshNet Elearning gives us personalized NIT AI mentorship sessions grounded in our exact Rwanda TVET syllabus! The sandbox console simulations are incredible.', rating: 5 },
-    { name: 'Damien N.', role: 'NIT Networking Major (Butare)', text: 'Being able to take official timed exams and practice quizzes generated on demand for our Networking and Internet Technology courses on JoshNet is a complete game-changer.', rating: 5 }
+    { name: 'Joshua K.', role: 'Networking Student', text: 'JoshNet Elearning changed how I prepare for my Networking and Internet Technology exams! The Packet Tracer labs and interactive flashcards helped me pass my syllabus modules.', rating: 5 },
+    { name: 'Amina U.', role: 'Junior Linux Administrator', text: 'W3Schools has always been my go-to for reference, but JoshNet Elearning gives us personalized AI mentorship sessions grounded in our exact syllabus! The sandbox console simulations are incredible.', rating: 5 },
+    { name: 'Damien N.', role: 'Networking & Systems Major', text: 'Being able to take official timed exams and practice quizzes generated on demand for our Networking and Internet Technology courses on JoshNet Elearning is a complete game-changer.', rating: 5 }
   ];
 
   const featuredDocs = documents.slice(0, 3);
@@ -88,19 +88,19 @@ export default function Dashboard({ progress, documents, onNavigateToSection, on
             darkMode ? 'bg-teal-500/10 text-teal-400 border border-teal-500/20' : 'bg-teal-100 text-teal-900 border border-teal-200'
           }`}>
             <Sparkles className="w-3.5 h-3.5 animate-pulse text-teal-500" />
-            Networking &amp; Internet Technology (NIT) Rwanda
+            Networking &amp; Internet Technology
           </span>
           
           <h1 className={`font-display text-4xl sm:text-6xl font-black tracking-tight leading-[1.05] ${
             darkMode ? 'text-white' : 'text-teal-950'
           }`}>
-            Learn NIT &amp; Tech Skills with JoshNet Elearning
+            Learn Networking &amp; Tech Skills with JoshNet Elearning
           </h1>
           
           <p className={`text-sm sm:text-base max-w-xl mx-auto leading-relaxed font-medium ${
             darkMode ? 'text-gray-300' : 'text-teal-900/90'
           }`}>
-            Built for Networking and Internet Technology (NIT) in Rwanda and founded by Uwizeyimana Joshua. Free syllabus textbooks, interactive Packet Tracer labs, Bash runtimes, and timed exams!
+            Built for Networking and Internet Technology and founded by Uwizeyimana Joshua. Free syllabus textbooks, interactive Packet Tracer labs, Bash runtimes, and timed exams!
           </p>
 
           {/* 2. SEARCH EVERYTHING */}
@@ -653,7 +653,7 @@ export default function Dashboard({ progress, documents, onNavigateToSection, on
                 JoshNet Elearning
               </span>
             </div>
-            <p className="text-[11px] text-gray-500 font-medium">Networking &amp; Internet Technology (NIT) Rwanda • Founded by Uwizeyimana Joshua.</p>
+            <p className="text-[11px] text-gray-500 font-medium">Networking &amp; Internet Technology • Founded by Uwizeyimana Joshua.</p>
           </div>
 
           <div className="flex flex-wrap items-center justify-center gap-6 text-[11px] font-bold">
@@ -670,7 +670,7 @@ export default function Dashboard({ progress, documents, onNavigateToSection, on
         </div>
 
         <div className="text-[10px] text-gray-500 flex flex-col sm:flex-row items-center justify-between gap-4 max-w-6xl mx-auto border-t border-gray-200/5 dark:border-white/5 pt-4">
-          <p>© {new Date().getFullYear()} JoshNet Elearning • Founded by Uwizeyimana Joshua (NIT Rwanda). All Rights Reserved.</p>
+          <p>© {new Date().getFullYear()} JoshNet Elearning • Founded by Uwizeyimana Joshua. All Rights Reserved.</p>
           <div className="flex items-center gap-3">
             <span className="px-2 py-0.5 rounded bg-teal-500/10 text-teal-400 font-mono font-bold">v2.5_ACTIVE</span>
             <span className="text-gray-400 font-semibold">Security Shield Enabled</span>

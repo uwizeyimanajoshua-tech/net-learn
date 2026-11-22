@@ -210,7 +210,7 @@ export default function CertificatesShowcase({ darkMode, progress, documents, us
                     JoshNet Elearning
                   </h1>
                   <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
-                    Networking &amp; Internet Technology (NIT) &bull; Kigali, Rwanda
+                    Networking &amp; Internet Technology &bull; JoshNet Elearning
                   </p>
 
                   <div className="h-0.5 bg-gradient-to-r from-transparent via-teal-500/40 to-transparent my-4" />

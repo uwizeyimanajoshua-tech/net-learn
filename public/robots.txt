@@ -1,4 +1,4 @@
-# robots.txt for JoshNet Elearning (JoshNet) - Networking & Internet Technology (NIT) Rwanda
+# robots.txt for JoshNet Elearning - Networking & Internet Technology Platform
 User-agent: *
 Allow: /
 Allow: /?tab=*

@@ -314,7 +314,7 @@ export default function LandingPage({ onEnterApp, darkMode, setDarkMode, onOpenA
         <div className="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-6">
           <div className="flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-indigo-400" />
-            <span className="font-display font-semibold text-sm text-gray-400">JoshNet Elearning Platform • NIT Rwanda</span>
+            <span className="font-display font-semibold text-sm text-gray-400">JoshNet Elearning Platform</span>
           </div>
           <span className="text-xs text-gray-500">
             &copy; 2026 JoshNet Elearning. Founded by Uwizeyimana Joshua. All rights reserved.

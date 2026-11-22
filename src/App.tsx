@@ -127,38 +127,38 @@ export default function App() {
 
   // When active tab, category, or document changes, update title, meta description, and canonical URL dynamically for SEO
   useEffect(() => {
-    let pageTitle = 'JoshNet Elearning (JoshNet) – Networking & Internet Technology (NIT) Rwanda';
-    let pageDesc = 'JoshNet Elearning (JoshNet) is Rwanda\'s Networking and Internet Technology (NIT) platform founded by Uwizeyimana Joshua, offering TVET notes, Cisco/Linux/Python labs, and exams.';
+    let pageTitle = 'JoshNet Elearning – Networking & Internet Technology';
+    let pageDesc = 'JoshNet Elearning is a Networking and Internet Technology platform founded by Uwizeyimana Joshua, offering structured notes, Cisco/Linux/Python labs, and timed exams.';
 
     const matchedDoc = navFilterDocId ? documents.find(d => d.id === navFilterDocId) : null;
 
     if (matchedDoc) {
       pageTitle = `${matchedDoc.name} – ${matchedDoc.category} Course Note | JoshNet Elearning`;
-      pageDesc = `Study ${matchedDoc.name} in ${matchedDoc.category} on JoshNet Elearning (NIT Rwanda, founded by Uwizeyimana Joshua). Interactive notes, code examples, practice questions, and AI tutoring.`;
+      pageDesc = `Study ${matchedDoc.name} in ${matchedDoc.category} on JoshNet Elearning, founded by Uwizeyimana Joshua. Interactive notes, code examples, practice questions, and AI tutoring.`;
     } else if (navFilterCategory) {
       pageTitle = `${navFilterCategory} Technical Curriculum & Notes | JoshNet Elearning`;
-      pageDesc = `Explore comprehensive ${navFilterCategory} course notes for Networking and Internet Technology (NIT) in Rwanda on JoshNet Elearning.`;
+      pageDesc = `Explore comprehensive ${navFilterCategory} course notes for Networking and Internet Technology on JoshNet Elearning.`;
     } else {
       const titles: Record<string, { title: string; desc: string }> = {
         dashboard: {
-          title: 'JoshNet Elearning (JoshNet) – Networking & Internet Technology (NIT) Rwanda',
-          desc: 'JoshNet Elearning, founded by Uwizeyimana Joshua in Rwanda, empowers NIT students with Networking, Linux, Windows Server, Cyber Security, C, and Python virtual labs.'
+          title: 'JoshNet Elearning – Networking & Internet Technology',
+          desc: 'JoshNet Elearning, founded by Uwizeyimana Joshua, empowers students with Networking, Linux, Windows Server, Cyber Security, C, and Python virtual labs.'
         },
         c_ide: {
           title: 'C Programming IDE & GCC Compiler | JoshNet Elearning',
           desc: 'Online C development environment on JoshNet Elearning with native GCC 12.3 compiler, x86_64 Intel assembly disassembly, heap memory tracking, and systems programming projects.'
         },
         documents: {
-          title: 'NIT Curriculum & Notes Library | JoshNet Elearning Rwanda',
-          desc: `Browse ${CATEGORIES.length} Networking and Internet Technology (NIT) domains, course notes, executable code tutorials, and practice exercises on JoshNet Elearning.`
+          title: 'Curriculum & Notes Library | JoshNet Elearning',
+          desc: `Browse ${CATEGORIES.length} Networking and Internet Technology domains, course notes, executable code tutorials, and practice exercises on JoshNet Elearning.`
         },
         exams: {
           title: 'Official Timed Exams & Practice Simulator | JoshNet Elearning',
-          desc: 'Take official timed & locked NIT exams, Rwanda TVET board assessments, and CCNA/Linux certification quizzes on JoshNet Elearning.'
+          desc: 'Take official timed & locked assessments and CCNA/Linux certification quizzes on JoshNet Elearning.'
         },
         ai_chat: {
-          title: 'NIT AI Technical Mentorship & Copilot | JoshNet Elearning',
-          desc: 'Consult your intelligent AI technical tutor on JoshNet Elearning grounded in Rwanda NIT/TVET curriculum, networking standards, and live systems documentation.'
+          title: 'Technical AI Mentorship & Copilot | JoshNet Elearning',
+          desc: 'Consult your intelligent AI technical tutor on JoshNet Elearning grounded in Networking and Internet Technology curriculum and live systems documentation.'
         },
         linux_sim: {
           title: 'Linux OS Terminal Simulator (Ubuntu 24.04 LTS) | JoshNet Elearning',
@@ -170,7 +170,7 @@ export default function App() {
         },
         flashcards: {
           title: 'Technical Flashcards & Active Recall Deck | JoshNet Elearning',
-          desc: 'Master Networking and Internet Technology (NIT) concepts with interactive 3D flippable study flashcards on JoshNet Elearning.'
+          desc: 'Master Networking and Internet Technology concepts with interactive 3D flippable study flashcards on JoshNet Elearning.'
         },
         videos: {
           title: 'Video Lectures & Practical Labs | JoshNet Elearning',
@@ -178,15 +178,15 @@ export default function App() {
         },
         community: {
           title: 'Student & Faculty Community Forum | JoshNet Elearning',
-          desc: 'Collaborate with Networking and Internet Technology (NIT) students and instructors across Rwanda on JoshNet Elearning.'
+          desc: 'Collaborate with Networking and Internet Technology students and instructors on JoshNet Elearning.'
         },
         certificates: {
           title: 'Verified Course Certificates & Transcripts | JoshNet Elearning',
           desc: 'Verify student achievements, module completion progress, and JoshNet Elearning credentials founded by Uwizeyimana Joshua.'
         },
         about: {
-          title: 'About JoshNet Elearning – Networking & Internet Technology (NIT) Rwanda',
-          desc: 'Learn about JoshNet Elearning (JoshNet), founded by Uwizeyimana Joshua for Networking and Internet Technology (NIT) students in Rwanda.'
+          title: 'About JoshNet Elearning – Networking & Internet Technology',
+          desc: 'Learn about JoshNet Elearning, founded by Uwizeyimana Joshua for Networking and Internet Technology learners.'
         },
         admin: {
           title: 'Administrator Analytics & Curriculum Portal | JoshNet Elearning',

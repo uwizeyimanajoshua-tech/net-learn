@@ -447,7 +447,7 @@ export default function VideoLectures({ darkMode = false, onNavigateToTab, user 
       instructor: newInstructor || 'JoshNet Elearning Faculty',
       views: '100 views',
       youtubeId: cleanId,
-      description: newDescription || 'Academic lecture session at JoshNet Elearning (NIT Rwanda).',
+      description: newDescription || 'Academic lecture session at JoshNet Elearning.',
       chapters: [
         { time: '00:00', seconds: 0, title: 'Lecture Introduction' },
         { time: '05:00', seconds: 300, title: 'Main Topic & Core Concepts' },

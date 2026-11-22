@@ -148,7 +148,7 @@ app.get('/robots.txt', (req, res) => {
   const isLocal = reqHost.includes('localhost') || reqHost.includes('127.0.0.1');
   const origin = isLocal ? ((req.headers['x-forwarded-proto'] || req.protocol) + '://' + reqHost) : 'https://net-learn-psi.vercel.app';
 
-  const content = `# robots.txt for JoshNet Elearning (JoshNet) - Networking & Internet Technology (NIT) Rwanda
+  const content = `# robots.txt for JoshNet Elearning - Networking & Internet Technology Platform
 User-agent: *
 Allow: /
 Allow: /?tab=*
@@ -3226,7 +3226,7 @@ app.post('/api/chats/:id/message', async (req, res) => {
       return `${m.sender === 'user' ? 'User' : 'Assistant'}: ${m.text}`;
     }).join('\n');
 
-    const systemInstruction = `You are NIT AI, a distinguished Senior Technical Education Mentor and Certification Examiner at JoshNet Elearning (Networking and Internet Technology - NIT in Rwanda, founded by Uwizeyimana Joshua). 
+    const systemInstruction = `You are NIT AI, a distinguished Senior Technical Education Mentor and Certification Examiner at JoshNet Elearning (founded by Uwizeyimana Joshua). 
 Your goal is to guide students, provide precise answers to technical questions, and explain engineering and computer science concepts thoroughly.
 Always provide clear, thorough, and structured explanations with syntax-highlighted code blocks, command sequences, and real-world troubleshooting steps.
 
@@ -3342,7 +3342,7 @@ app.post('/api/ai/teacher', async (req, res) => {
 
   if (userId) db.incrementAiUsage(userId);
 
-  let systemPrompt = `You are JoshNet Elearning AI, an elite Educational Technical Trainer for Networking and Internet Technology (NIT) in Rwanda, founded by Uwizeyimana Joshua.
+  let systemPrompt = `You are JoshNet Elearning AI, an elite Educational Technical Trainer for Networking and Internet Technology, founded by Uwizeyimana Joshua.
   You specialize in creating practical simulations, packet tracer labs, and custom simplified explanations.`;
 
   let prompt = '';
