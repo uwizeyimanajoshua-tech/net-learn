@@ -13,8 +13,20 @@
       "destination": "/api/index.ts"
     },
     {
+      "source": "/BingSiteAuth.xml",
+      "destination": "/api/index.ts"
+    },
+    {
+      "source": "/googleced4164132c1cca0.html",
+      "destination": "/api/index.ts"
+    },
+    {
       "source": "/robots.txt",
       "destination": "/robots.txt"
+    },
+    {
+      "source": "/opensearch.xml",
+      "destination": "/opensearch.xml"
     },
     {
       "source": "/api/(.*)",

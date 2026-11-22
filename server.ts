@@ -175,6 +175,17 @@ app.get('/googleced4164132c1cca0.html', (req, res) => {
   res.send('google-site-verification: googleced4164132c1cca0.html');
 });
 
+// Bing Webmaster Tools Site Verification Endpoint
+app.get('/BingSiteAuth.xml', (req, res) => {
+  res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.send(`<?xml version="1.0"?>
+<users>
+\t<user>2CFDD76A2C5E692A69F3A67C77510D73</user>
+</users>
+`);
+});
+
 // Setup multer for memory storage uploads with 105MB limit (100MB file + multipart boundary overhead)
 const upload = multer({
   storage: multer.memoryStorage(),
