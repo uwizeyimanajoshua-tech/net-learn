@@ -800,8 +800,8 @@ export default function DocumentViewer({
   };
 
   // Tab and layout states for viewing a document
-  const [activeTabType, setActiveTabType] = useState<'reader' | 'original' | 'summary' | 'sandbox' | 'linux_sim' | 'python_sim'>('reader');
-  const [layoutMode, setLayoutMode] = useState<'standard' | 'split' | 'full'>('standard');
+  const [activeTabType, setActiveTabType] = useState<'reader' | 'original' | 'split' | 'summary' | 'sandbox' | 'linux_sim' | 'python_sim'>('reader');
+  const [layoutMode, setLayoutMode] = useState<'standard' | 'split' | 'full'>('full');
   const [splitSide, setSplitSide] = useState<'left' | 'right'>('left');
 
   // W3Schools-like Reading Controls State
@@ -1524,36 +1524,163 @@ export default function DocumentViewer({
             </div>
           </div>
         ) : (
-          <>
+          <div className="space-y-4">
             {loadingFullDoc && (
-              <div className="mb-3 px-4 py-2 rounded-xl bg-[#04aa6d]/10 border border-[#04aa6d]/30 text-[#04aa6d] text-xs font-bold flex items-center gap-2">
+              <div className="px-4 py-2 rounded-xl bg-[#04aa6d]/10 border border-[#04aa6d]/30 text-[#04aa6d] text-xs font-bold flex items-center gap-2">
                 <span className="w-3.5 h-3.5 rounded-full border-2 border-[#04aa6d] border-t-transparent animate-spin inline-block" />
-                <span>Loading complete notes for all indicative content sections...</span>
+                <span>Loading complete document and all indicative content sections...</span>
               </div>
             )}
-            <W3SchoolsNoteViewer
-              document={viewingDoc}
-              darkMode={darkMode}
-              onNavigateHome={() => {
-                onNavigateToSection('documents', undefined, undefined);
-                setViewingDoc(null);
-                setActiveSummary(null);
-              }}
-              onPrevDoc={prevDoc ? handlePrev : undefined}
-              onNextDoc={nextDoc ? handleNext : undefined}
-              hasPrevDoc={Boolean(prevDoc)}
-              hasNextDoc={Boolean(nextDoc)}
-              onDeleteDoc={isAdmin ? () => setDocToDelete(viewingDoc) : undefined}
-              onEditDoc={isAdmin ? handleStartEdit : undefined}
-              userRole={isAdmin ? 'admin' : userRole}
-              onLaunchLinuxSimulator={() => {
-                onNavigateToSection('linux_sim', viewingDoc.category as CategoryName, viewingDoc.id);
-              }}
-              onLaunchPythonSimulator={() => {
-                onNavigateToSection('python_sim', viewingDoc.category as CategoryName, viewingDoc.id);
-              }}
-            />
-          </>
+
+            {/* Top View Mode Switcher: Indicative Study Chapters vs All Notes As Uploaded vs Side-by-Side */}
+            <div className={`px-4 py-2.5 rounded-2xl border flex flex-wrap items-center justify-between gap-3 ${
+              darkMode ? 'bg-[#0f1722] border-white/10 text-gray-200' : 'bg-white border-gray-200 text-gray-800 shadow-sm'
+            }`}>
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <button
+                  onClick={() => {
+                    onNavigateToSection('documents', undefined, undefined);
+                    setViewingDoc(null);
+                    setActiveSummary(null);
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
+                    darkMode ? 'border-white/10 hover:bg-white/5 text-gray-300' : 'border-gray-200 hover:bg-gray-100 text-gray-700'
+                  }`}
+                >
+                  <span>&larr; All Courses</span>
+                </button>
+                <span className="text-xs font-extrabold truncate max-w-[260px] sm:max-w-md" title={viewingDoc.name}>
+                  {viewingDoc.name}
+                </span>
+                <span className="text-[11px] font-mono text-gray-400">
+                  ({(viewingDoc.textContent || '').length.toLocaleString()} chars • {viewingDoc.splitContent?.length || 0} sections)
+                </span>
+              </div>
+
+              <div className={`flex items-center p-1 rounded-xl border text-xs font-bold flex-wrap gap-1 ${
+                darkMode ? 'bg-black/40 border-white/10' : 'bg-gray-100 border-gray-200'
+              }`}>
+                <button
+                  onClick={() => setActiveTabType('original')}
+                  className={`px-3.5 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                    activeTabType === 'original'
+                      ? 'bg-emerald-600 text-white shadow'
+                      : darkMode ? 'text-gray-300 hover:text-white' : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                  id="btn-mode-original-notes"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>All Notes As Uploaded (Full As-Is)</span>
+                </button>
+
+                <button
+                  onClick={() => setActiveTabType('reader')}
+                  className={`px-3.5 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                    activeTabType === 'reader'
+                      ? 'bg-[#04aa6d] text-white shadow'
+                      : darkMode ? 'text-gray-300 hover:text-white' : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                  id="btn-mode-study-chapters"
+                >
+                  <BookOpen className="w-3.5 h-3.5" />
+                  <span>Structured Study Chapters</span>
+                </button>
+
+                <button
+                  onClick={() => setActiveTabType('split')}
+                  className={`hidden xl:flex px-3.5 py-1.5 rounded-lg transition-all cursor-pointer items-center gap-1.5 ${
+                    activeTabType === 'split'
+                      ? 'bg-indigo-600 text-white shadow'
+                      : darkMode ? 'text-gray-300 hover:text-white' : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                  id="btn-mode-split-view"
+                >
+                  <Split className="w-3.5 h-3.5" />
+                  <span>Side-by-Side</span>
+                </button>
+              </div>
+            </div>
+
+            {activeTabType === 'original' ? (
+              <OriginalDocumentRenderer
+                document={viewingDoc}
+                darkMode={darkMode}
+                layoutMode={layoutMode}
+                onLayoutModeChange={(mode) => {
+                  if (mode === 'split') {
+                    setActiveTabType('split');
+                  } else {
+                    setLayoutMode(mode);
+                  }
+                }}
+              />
+            ) : activeTabType === 'split' ? (
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
+                <div className={splitSide === 'right' ? 'xl:order-2' : 'xl:order-1'}>
+                  <OriginalDocumentRenderer
+                    document={viewingDoc}
+                    darkMode={darkMode}
+                    layoutMode="split"
+                    splitSide={splitSide}
+                    onToggleSplitSide={() => setSplitSide(prev => prev === 'left' ? 'right' : 'left')}
+                    onLayoutModeChange={(mode) => {
+                      if (mode === 'full') setActiveTabType('original');
+                      else if (mode === 'standard') setActiveTabType('reader');
+                    }}
+                  />
+                </div>
+                <div className={splitSide === 'right' ? 'xl:order-1' : 'xl:order-2'}>
+                  <W3SchoolsNoteViewer
+                    document={viewingDoc}
+                    darkMode={darkMode}
+                    onNavigateHome={() => {
+                      onNavigateToSection('documents', undefined, undefined);
+                      setViewingDoc(null);
+                      setActiveSummary(null);
+                    }}
+                    onPrevDoc={prevDoc ? handlePrev : undefined}
+                    onNextDoc={nextDoc ? handleNext : undefined}
+                    hasPrevDoc={Boolean(prevDoc)}
+                    hasNextDoc={Boolean(nextDoc)}
+                    onDeleteDoc={isAdmin ? () => setDocToDelete(viewingDoc) : undefined}
+                    onEditDoc={isAdmin ? handleStartEdit : undefined}
+                    userRole={isAdmin ? 'admin' : userRole}
+                    onViewOriginalNotes={() => setActiveTabType('original')}
+                    onLaunchLinuxSimulator={() => {
+                      onNavigateToSection('linux_sim', viewingDoc.category as CategoryName, viewingDoc.id);
+                    }}
+                    onLaunchPythonSimulator={() => {
+                      onNavigateToSection('python_sim', viewingDoc.category as CategoryName, viewingDoc.id);
+                    }}
+                  />
+                </div>
+              </div>
+            ) : (
+              <W3SchoolsNoteViewer
+                document={viewingDoc}
+                darkMode={darkMode}
+                onNavigateHome={() => {
+                  onNavigateToSection('documents', undefined, undefined);
+                  setViewingDoc(null);
+                  setActiveSummary(null);
+                }}
+                onPrevDoc={prevDoc ? handlePrev : undefined}
+                onNextDoc={nextDoc ? handleNext : undefined}
+                hasPrevDoc={Boolean(prevDoc)}
+                hasNextDoc={Boolean(nextDoc)}
+                onDeleteDoc={isAdmin ? () => setDocToDelete(viewingDoc) : undefined}
+                onEditDoc={isAdmin ? handleStartEdit : undefined}
+                userRole={isAdmin ? 'admin' : userRole}
+                onViewOriginalNotes={() => setActiveTabType('original')}
+                onLaunchLinuxSimulator={() => {
+                  onNavigateToSection('linux_sim', viewingDoc.category as CategoryName, viewingDoc.id);
+                }}
+                onLaunchPythonSimulator={() => {
+                  onNavigateToSection('python_sim', viewingDoc.category as CategoryName, viewingDoc.id);
+                }}
+              />
+            )}
+          </div>
         )}
 
         {renderDeleteModal()}

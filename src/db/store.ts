@@ -5,7 +5,7 @@ dotenv.config();
 
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { initializeFirestore, getFirestore, Firestore, doc, setDoc, updateDoc, deleteDoc, collection, getDocs, writeBatch } from 'firebase/firestore';
-import type { User, Document, ChatSession, Quiz, Flashcard, StudentProgress } from '../types.js';
+import type { User, Document, ChatSession, Quiz, Flashcard, StudentProgress, OfficialExam, ExamSession, ExamSubmission } from '../types.js';
 import { CATEGORIES } from '../types.js';
 
 // Read Firebase applet configuration
@@ -92,14 +92,11 @@ export function hasBrokenCurriculumStubs(sections?: any[]): boolean {
 }
 
 // Keep every Firestore document safely under Firestore's 1 MiB (1,048,576 bytes) ceiling
-// while preserving ALL curriculum sections and Indicative Content notes.
+// while preserving full raw uploaded text AND ALL curriculum sections.
 function prepareDocumentForFirestore(docObj: any): Record<string, any> {
   const clean: any = sanitizeForFirestore(docObj);
   if (typeof clean.fileData === 'string' && clean.fileData.length > 260000) {
     delete clean.fileData;
-  }
-  if (typeof clean.textContent === 'string' && clean.textContent.length > 200000) {
-    clean.textContent = clean.textContent.slice(0, 200000);
   }
   if (Array.isArray(clean.splitContent) && clean.splitContent.length > 120) {
     clean.splitContent = clean.splitContent.slice(0, 120);
@@ -123,17 +120,14 @@ function prepareDocumentForFirestore(docObj: any): Record<string, any> {
     serializedLen = Buffer.byteLength(JSON.stringify(clean), 'utf8');
   }
 
-  // Trim redundant raw textContent FIRST before ever touching section notes
-  if (serializedLen > MAX_BYTES && typeof clean.textContent === 'string') {
-    clean.textContent = clean.textContent.slice(0, 100000);
-    serializedLen = Buffer.byteLength(JSON.stringify(clean), 'utf8');
-  }
-  if (serializedLen > MAX_BYTES && typeof clean.textContent === 'string') {
-    clean.textContent = clean.textContent.slice(0, 25000);
-    serializedLen = Buffer.byteLength(JSON.stringify(clean), 'utf8');
-  }
-  if (serializedLen > MAX_BYTES && typeof clean.textContent === 'string') {
-    clean.textContent = clean.textContent.slice(0, 6000);
+  // Only trim raw textContent to the exact remaining byte budget when total payload exceeds MAX_BYTES
+  if (serializedLen > MAX_BYTES && typeof clean.textContent === 'string' && clean.textContent.length > 6000) {
+    const withoutText = { ...clean, textContent: '' };
+    const baseBytes = Buffer.byteLength(JSON.stringify(withoutText), 'utf8');
+    const availableForText = Math.max(6000, MAX_BYTES - baseBytes - 4096);
+    if (clean.textContent.length > availableForText) {
+      clean.textContent = clean.textContent.slice(0, availableForText);
+    }
     serializedLen = Buffer.byteLength(JSON.stringify(clean), 'utf8');
   }
 
@@ -195,6 +189,9 @@ interface DatabaseSchema {
   documents: Document[];
   chats: ChatSession[];
   quizzes: Quiz[];
+  exams: OfficialExam[];
+  examSessions: ExamSession[];
+  examSubmissions: ExamSubmission[];
   flashcards: Flashcard[];
   progress: StudentProgress[];
 }
@@ -355,7 +352,10 @@ const DEFAULT_DB: DatabaseSchema = {
       aiUsageCount: 4,
       lastActive: new Date().toISOString()
     }
-  ]
+  ],
+  exams: [],
+  examSessions: [],
+  examSubmissions: []
 };
 
 // Helper to safely write and read store
@@ -399,6 +399,18 @@ function loadDB(): DatabaseSchema {
       }
       if (!parsed.progress || !Array.isArray(parsed.progress)) {
         parsed.progress = JSON.parse(JSON.stringify(DEFAULT_DB.progress));
+        isModified = true;
+      }
+      if (!parsed.exams || !Array.isArray(parsed.exams)) {
+        parsed.exams = [];
+        isModified = true;
+      }
+      if (!parsed.examSessions || !Array.isArray(parsed.examSessions)) {
+        parsed.examSessions = [];
+        isModified = true;
+      }
+      if (!parsed.examSubmissions || !Array.isArray(parsed.examSubmissions)) {
+        parsed.examSubmissions = [];
         isModified = true;
       }
 
@@ -873,6 +885,109 @@ export const db = {
     }
   },
 
+  // Official Admin-Prepared Exams
+  getExams: () => loadDB().exams || [],
+  getExamById: (id: string) => (loadDB().exams || []).find(e => e.id === id),
+  createExam: async (exam: OfficialExam) => {
+    const data = loadDB();
+    if (!data.exams) data.exams = [];
+    data.exams.unshift(exam);
+    saveDB(data);
+    await runFirestore(async () => {
+      await setDoc(doc(dbFirestore!, 'exams', exam.id), sanitizeForFirestore(exam));
+    });
+    return exam;
+  },
+  updateExam: async (id: string, updates: Partial<OfficialExam>) => {
+    const data = loadDB();
+    if (!data.exams) data.exams = [];
+    const idx = data.exams.findIndex(e => e.id === id);
+    if (idx === -1) return null;
+    data.exams[idx] = { ...data.exams[idx], ...updates, updatedAt: new Date().toISOString() };
+    saveDB(data);
+    await runFirestore(async () => {
+      await setDoc(doc(dbFirestore!, 'exams', id), sanitizeForFirestore(data.exams[idx]), { merge: true });
+    });
+    return data.exams[idx];
+  },
+  deleteExam: async (id: string): Promise<boolean> => {
+    const data = loadDB();
+    const existed = (data.exams || []).some(e => e.id === id);
+    if (!existed) return false;
+    const removedSubs = (data.examSubmissions || []).filter(s => s.examId === id).map(s => s.id);
+    const removedSessions = (data.examSessions || []).filter(s => s.examId === id).map(s => s.id);
+    data.exams = (data.exams || []).filter(e => e.id !== id);
+    data.examSubmissions = (data.examSubmissions || []).filter(s => s.examId !== id);
+    data.examSessions = (data.examSessions || []).filter(s => s.examId !== id);
+    saveDB(data);
+    await runFirestore(async () => {
+      await deleteDoc(doc(dbFirestore!, 'exams', id));
+      for (const sid of removedSubs) {
+        await deleteDoc(doc(dbFirestore!, 'exam_submissions', sid)).catch(() => {});
+      }
+      for (const sessId of removedSessions) {
+        await deleteDoc(doc(dbFirestore!, 'exam_sessions', sessId)).catch(() => {});
+      }
+    });
+    return true;
+  },
+
+  // Exam Sessions (server-anchored timer & tab-switch violation counter)
+  getExamSessions: () => loadDB().examSessions || [],
+  getExamSession: (examId: string, userId: string) =>
+    (loadDB().examSessions || []).find(s => s.examId === examId && s.userId === userId),
+  upsertExamSession: async (session: ExamSession) => {
+    const data = loadDB();
+    if (!data.examSessions) data.examSessions = [];
+    const idx = data.examSessions.findIndex(s => s.id === session.id || (s.examId === session.examId && s.userId === session.userId));
+    if (idx !== -1) {
+      data.examSessions[idx] = { ...data.examSessions[idx], ...session };
+    } else {
+      data.examSessions.push(session);
+    }
+    saveDB(data);
+    await runFirestore(async () => {
+      await setDoc(doc(dbFirestore!, 'exam_sessions', session.id), sanitizeForFirestore(session), { merge: true });
+    });
+    return session;
+  },
+
+  // Exam Submissions
+  getExamSubmissions: (examId?: string) => {
+    const all = loadDB().examSubmissions || [];
+    return examId ? all.filter(s => s.examId === examId) : all;
+  },
+  getExamSubmissionByUser: (examId: string, userId: string) =>
+    (loadDB().examSubmissions || []).find(s => s.examId === examId && s.userId === userId),
+  createExamSubmission: async (sub: ExamSubmission) => {
+    const data = loadDB();
+    if (!data.examSubmissions) data.examSubmissions = [];
+    const existingIdx = data.examSubmissions.findIndex(s => s.examId === sub.examId && s.userId === sub.userId);
+    if (existingIdx !== -1) {
+      data.examSubmissions[existingIdx] = sub;
+    } else {
+      data.examSubmissions.unshift(sub);
+    }
+    saveDB(data);
+    await runFirestore(async () => {
+      await setDoc(doc(dbFirestore!, 'exam_submissions', sub.id), sanitizeForFirestore(sub));
+    });
+    return sub;
+  },
+  deleteExamSubmission: async (subId: string): Promise<boolean> => {
+    const data = loadDB();
+    const target = (data.examSubmissions || []).find(s => s.id === subId);
+    if (!target) return false;
+    data.examSubmissions = (data.examSubmissions || []).filter(s => s.id !== subId);
+    data.examSessions = (data.examSessions || []).filter(s => !(s.examId === target.examId && s.userId === target.userId));
+    saveDB(data);
+    await runFirestore(async () => {
+      await deleteDoc(doc(dbFirestore!, 'exam_submissions', subId));
+      await deleteDoc(doc(dbFirestore!, 'exam_sessions', `esess_${target.examId}_${target.userId}`)).catch(() => {});
+    });
+    return true;
+  },
+
   // Master resets / clear data for debugging
   resetAll: () => {
     saveDB(DEFAULT_DB);
@@ -1062,7 +1177,8 @@ export async function syncFromFirestore() {
           !inFs.splitContent ||
           inFs.splitContent.length === 0 ||
           hasBrokenCurriculumStubs(inFs.splitContent) ||
-          docItem.splitContent.length > inFs.splitContent.length
+          docItem.splitContent.length > inFs.splitContent.length ||
+          ((docItem.textContent?.length || 0) > (inFs.textContent?.length || 0) + 5000 && (inFs.textContent?.length || 0) <= 200005)
         );
         if (!inFs || fsNeedsUpgrade) {
           try {
@@ -1110,11 +1226,14 @@ export async function syncAppCollectionsIfStale(maxAgeMs = 15000): Promise<void>
   }
   activeAppCollectionsSync = (async () => {
     await runFirestore(async () => {
-      const [quizSnap, fcSnap, chatSnap, progSnap] = await Promise.all([
+      const [quizSnap, fcSnap, chatSnap, progSnap, examSnap, examSubSnap, examSessSnap] = await Promise.all([
         getDocs(collection(dbFirestore!, 'quizzes')),
         getDocs(collection(dbFirestore!, 'flashcards')),
         getDocs(collection(dbFirestore!, 'chats')),
-        getDocs(collection(dbFirestore!, 'progress'))
+        getDocs(collection(dbFirestore!, 'progress')),
+        getDocs(collection(dbFirestore!, 'exams')),
+        getDocs(collection(dbFirestore!, 'exam_submissions')),
+        getDocs(collection(dbFirestore!, 'exam_sessions'))
       ]);
 
       const localDB = loadDB();
@@ -1136,6 +1255,9 @@ export async function syncAppCollectionsIfStale(maxAgeMs = 15000): Promise<void>
       localDB.quizzes = mergeById(localDB.quizzes, quizSnap);
       localDB.flashcards = mergeById(localDB.flashcards, fcSnap);
       localDB.chats = mergeById(localDB.chats, chatSnap);
+      localDB.exams = mergeById(localDB.exams || [], examSnap);
+      localDB.examSubmissions = mergeById(localDB.examSubmissions || [], examSubSnap);
+      localDB.examSessions = mergeById(localDB.examSessions || [], examSessSnap);
 
       if (progSnap && !progSnap.empty) {
         const progMap = new Map<string, StudentProgress>();

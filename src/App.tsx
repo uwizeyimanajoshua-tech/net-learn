@@ -425,7 +425,7 @@ export default function App() {
   const mainNavItems = [
     { id: 'dashboard', label: 'Home' },
     { id: 'documents', label: 'Learn' },
-    { id: 'exams', label: 'Practice' },
+    { id: 'exams', label: 'Exams & Practice' },
     { id: 'ai_chat', label: 'NIT AI' },
     { id: 'community', label: 'Community' },
     { id: 'certificates', label: 'Certificates' },
@@ -813,6 +813,9 @@ export default function App() {
           {activeTab === 'exams' && (
             <ExamSimulator 
               userId={user.id} 
+              userRole={user.role}
+              userEmail={user.email}
+              username={user.username}
               documents={documents} 
               initialDocId={navFilterDocId}
               onQuizSubmit={loadUserData} 

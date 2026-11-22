@@ -7,9 +7,13 @@ import {
 } from 'lucide-react';
 import { Quiz, QuizQuestion, CategoryName, CATEGORIES } from '../types.js';
 import CodeRunnerWidget, { SupportedLanguage } from './CodeRunnerWidget.js';
+import OfficialExamsHub from './OfficialExamsHub.js';
 
 interface ExamSimulatorProps {
   userId: string;
+  userRole?: string;
+  userEmail?: string;
+  username?: string;
   documents: { id: string; name: string; category: string }[];
   initialDocId?: string;
   onQuizSubmit: () => void;
@@ -18,11 +22,21 @@ interface ExamSimulatorProps {
 
 export default function ExamSimulator({ 
   userId, 
+  userRole,
+  userEmail,
+  username,
   documents, 
   initialDocId, 
   onQuizSubmit, 
   darkMode 
 }: ExamSimulatorProps) {
+  const isAdmin =
+    userRole === 'admin' ||
+    userRole === 'teacher' ||
+    userEmail?.toLowerCase() === 'uwizeyimanajoshua@gmail.com' ||
+    userId === 'usr_admin';
+
+  const [examHubTab, setExamHubTab] = useState<'official' | 'manage' | 'practice'>('official');
   // Config selection states
   const [category, setCategory] = useState<CategoryName>('Networking');
   const [docId, setDocId] = useState<string>(initialDocId || '');
@@ -302,16 +316,76 @@ export default function ExamSimulator({
 
   return (
     <div className="space-y-6 animate-fade-in text-left">
-      <div className="pb-2 border-b border-gray-200 dark:border-white/10">
-        <h1 className={`font-display text-2xl sm:text-3xl font-black tracking-tight ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-          Technical Practice Exams & Certification Simulator
-        </h1>
-        <p className="text-xs text-gray-500 dark:text-gray-400 font-medium mt-1">
-          Formulate interactive technical examinations, past national assessments, and certification scenarios tailored to your syllabus
-        </p>
+      <div className="pb-4 border-b border-gray-200 dark:border-white/10 flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className={`font-display text-2xl sm:text-3xl font-black tracking-tight ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+            Official Course Exams & Practice Simulator
+          </h1>
+          <p className="text-xs text-gray-500 dark:text-gray-400 font-medium mt-1">
+            Take administrator-set timed & locked exams visible to every account, or generate self-practice quizzes
+          </p>
+        </div>
+
+        <div className={`flex items-center p-1 rounded-2xl border text-xs font-bold flex-wrap gap-1 ${
+          darkMode ? 'bg-black/40 border-white/10' : 'bg-gray-100 border-gray-200'
+        }`}>
+          <button
+            type="button"
+            onClick={() => setExamHubTab('official')}
+            className={`px-4 py-2 rounded-xl transition-all cursor-pointer ${
+              examHubTab === 'official'
+                ? 'bg-emerald-600 text-white shadow'
+                : darkMode ? 'text-gray-300 hover:text-white' : 'text-gray-600 hover:text-gray-900'
+            }`}
+            id="tab-official-exams"
+          >
+            Official Exams
+          </button>
+
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => setExamHubTab('manage')}
+              className={`px-4 py-2 rounded-xl transition-all cursor-pointer ${
+                examHubTab === 'manage'
+                  ? 'bg-indigo-600 text-white shadow'
+                  : darkMode ? 'text-gray-300 hover:text-white' : 'text-gray-600 hover:text-gray-900'
+              }`}
+              id="tab-admin-exam-builder"
+            >
+              Admin Set & Lock Exam
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setExamHubTab('practice')}
+            className={`px-4 py-2 rounded-xl transition-all cursor-pointer ${
+              examHubTab === 'practice'
+                ? 'bg-brand-primary text-white shadow'
+                : darkMode ? 'text-gray-300 hover:text-white' : 'text-gray-600 hover:text-gray-900'
+            }`}
+            id="tab-practice-quiz"
+          >
+            AI Practice Generator
+          </button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      {examHubTab !== 'practice' ? (
+        <OfficialExamsHub
+          userId={userId}
+          userRole={userRole}
+          userEmail={userEmail}
+          username={username}
+          isAdmin={isAdmin}
+          documents={documents}
+          darkMode={darkMode}
+          onExamSubmitted={onQuizSubmit}
+          defaultSubView={examHubTab === 'manage' ? 'manage' : 'take'}
+        />
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
       
       {/* LEFT COLUMN: Setup Configuration */}
       <div className="lg:col-span-1 space-y-6">
@@ -1218,6 +1292,7 @@ export default function ExamSimulator({
         </div>
       </div>
     </div>
+      )}
   </div>
   );
 }

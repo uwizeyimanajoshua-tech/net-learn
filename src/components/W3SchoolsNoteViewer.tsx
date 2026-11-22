@@ -22,6 +22,7 @@ interface W3SchoolsNoteViewerProps {
   userRole?: string;
   onLaunchLinuxSimulator?: () => void;
   onLaunchPythonSimulator?: () => void;
+  onViewOriginalNotes?: () => void;
 }
 
 export type W3Theme = 'w3-light' | 'w3-dark' | 'w3-sepia';
@@ -38,7 +39,8 @@ export default function W3SchoolsNoteViewer({
   onEditDoc,
   userRole,
   onLaunchLinuxSimulator,
-  onLaunchPythonSimulator
+  onLaunchPythonSimulator,
+  onViewOriginalNotes
 }: W3SchoolsNoteViewerProps) {
   // Theme & Appearance State
   const [theme, setTheme] = useState<W3Theme>(darkMode ? 'w3-dark' : 'w3-light');
@@ -1525,6 +1527,18 @@ export default function W3SchoolsNoteViewer({
             >
               <Edit className="w-3.5 h-3.5" />
               <span className="hidden md:inline">Edit</span>
+            </button>
+          )}
+
+          {onViewOriginalNotes && (
+            <button
+              onClick={onViewOriginalNotes}
+              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#04aa6d]/15 text-[#04aa6d] border border-[#04aa6d]/35 hover:bg-[#04aa6d] hover:text-white transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
+              title="View 100% of all uploaded notes as-is (cover page, intro, full text & PDF)"
+              id="btn-w3-view-original-notes"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">All Notes As Uploaded</span>
             </button>
           )}
 

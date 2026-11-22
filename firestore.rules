@@ -52,6 +52,30 @@ service cloud.firestore {
       allow write: if isAdmin() || request.auth == null;
     }
 
+    // Official Admin Exams: Published exams readable; only Admin or server writes
+    match /exams/{examId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin() || request.auth == null;
+    }
+
+    // Proctored Exam Sessions (timer anchoring & tab violation tracking)
+    match /exam_sessions/{sessionId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Student Exam Submissions
+    match /exam_submissions/{submissionId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Student Learning Progress
+    match /progress/{progressId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
     // Flashcards: Educational cards
     match /flashcards/{flashcardId} {
       allow read: if true;

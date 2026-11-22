@@ -108,6 +108,63 @@ export interface Quiz {
   createdAt: string;
 }
 
+export interface OfficialExam {
+  id: string;
+  title: string;
+  description?: string;
+  category: string;
+  docId?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  durationMinutes: number;
+  availableUntil?: string | null;
+  isPublished: boolean;
+  isLocked: boolean;
+  accessCode?: string;
+  allowRetake: boolean;
+  hideAfterSubmitOrExpiry: boolean;
+  preventTabSwitch: boolean;
+  maxTabSwitches: number;
+  preventCopyPaste: boolean;
+  requireFullscreen: boolean;
+  passingScorePercent: number;
+  showResultsAfterSubmit: boolean;
+  questions: QuizQuestion[];
+}
+
+export interface ExamSession {
+  id: string;
+  examId: string;
+  userId: string;
+  startedAt: string;
+  expiresAt: string;
+  tabSwitchCount: number;
+  status: 'active' | 'submitted' | 'expired';
+  answersDraft?: Record<string, number>;
+  updatedAt?: string;
+}
+
+export interface ExamSubmission {
+  id: string;
+  examId: string;
+  examTitle: string;
+  category: string;
+  userId: string;
+  username: string;
+  userEmail: string;
+  answers: Record<string, number>;
+  score: number;
+  maxScore: number;
+  percentage: number;
+  passed: boolean;
+  submittedAt: string;
+  autoSubmitted: boolean;
+  autoSubmitReason?: 'manual' | 'time_expired' | 'tab_switch_violation' | 'deadline_passed';
+  tabSwitchCount: number;
+  timeTakenSeconds: number;
+}
+
 export interface Flashcard {
   id: string;
   userId: string;

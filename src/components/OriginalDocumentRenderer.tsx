@@ -117,6 +117,8 @@ export default function OriginalDocumentRenderer({
 
   // Active view tab: 'document' (authentic pages/PDF) vs 'drawings' (vector objects/schematics)
   const [activeViewTab, setActiveViewTab] = useState<'document' | 'drawings'>('document');
+  const [textDisplayMode, setTextDisplayMode] = useState<'verbatim' | 'chapters'>('verbatim');
+  const [preferFullTextOverPdf, setPreferFullTextOverPdf] = useState<boolean>(false);
   const [paperTheme, setPaperTheme] = useState<'paper' | 'dark' | 'sepia' | 'blueprint'>('paper');
   const [fontFamily, setFontFamily] = useState<'sans' | 'serif' | 'mono'>('sans');
   const [readingLayout, setReadingLayout] = useState<'paginated' | 'scroll'>('scroll');
@@ -349,7 +351,7 @@ export default function OriginalDocumentRenderer({
   // Structured Block Interface for academic formatting
   interface DocBlock {
     id: string;
-    type: 'header' | 'subheader' | 'outcome' | 'keyterms' | 'code' | 'bullet' | 'paragraph' | 'image';
+    type: 'header' | 'subheader' | 'outcome' | 'keyterms' | 'code' | 'bullet' | 'paragraph' | 'image' | 'verbatim';
     text: string;
     items?: string[];
     imgUrl?: string;
@@ -616,13 +618,89 @@ export default function OriginalDocumentRenderer({
     return sheets;
   }, [doc]);
 
-  const totalTextPages = Math.max(formattedSheets.length, 1);
+  // Verbatim As-Uploaded full text sheets (preserves 100% of uploaded file text in order)
+  const verbatimSheets: FormattedSheet[] = useMemo(() => {
+    const rawFull = (doc.textContent && doc.textContent.trim().length > 0)
+      ? doc.textContent
+      : (doc.splitContent && doc.splitContent.length > 0
+          ? doc.splitContent.map(s => `${s.title ? `# ${s.title}\n\n` : ''}${s.content || ''}`).join('\n\n---\n\n')
+          : 'No text content extracted from this document.');
+
+    const cleaned = rawFull.replace(/\r\n/g, '\n');
+    const CHUNK_SIZE = 12000;
+    const sheets: FormattedSheet[] = [];
+    let cursor = 0;
+    let idx = 0;
+
+    while (cursor < cleaned.length) {
+      let end = Math.min(cursor + CHUNK_SIZE, cleaned.length);
+      if (end < cleaned.length) {
+        const paraBreak = cleaned.lastIndexOf('\n\n', end);
+        if (paraBreak > cursor + 2500) {
+          end = paraBreak + 2;
+        } else {
+          const lineBreak = cleaned.lastIndexOf('\n', end);
+          if (lineBreak > cursor + 1500) {
+            end = lineBreak + 1;
+          }
+        }
+      }
+
+      const slice = cleaned.slice(cursor, end).trim();
+      if (slice) {
+        const firstHeading = slice
+          .split('\n')
+          .map(l => l.trim())
+          .find(l => l.length > 3 && l.length < 90);
+        const title = idx === 0
+          ? `Part 1 (Cover, Front Matter & Start of Notes)`
+          : `Part ${idx + 1}${firstHeading ? `: ${firstHeading.replace(/^[#*\-\s]+/, '').slice(0, 55)}` : ''}`;
+
+        sheets.push({
+          sheetIndex: idx,
+          title,
+          blocks: [
+            {
+              id: `blk_verb_hdr_${idx}`,
+              type: 'header',
+              text: title
+            },
+            {
+              id: `blk_verb_body_${idx}`,
+              type: 'verbatim',
+              text: slice
+            }
+          ]
+        });
+        idx++;
+      }
+      cursor = end;
+    }
+
+    if (sheets.length === 0) {
+      sheets.push({
+        sheetIndex: 0,
+        title: doc.name,
+        blocks: [{ id: 'blk_verb_empty', type: 'verbatim', text: cleaned }]
+      });
+    }
+
+    return sheets;
+  }, [doc]);
+
+  const activeSheets = textDisplayMode === 'verbatim' ? verbatimSheets : formattedSheets;
+  const totalTextPages = Math.max(activeSheets.length, 1);
   const [textPageIndex, setTextPageIndex] = useState<number>(0);
+
+  useEffect(() => {
+    setTextPageIndex(0);
+  }, [doc.id, textDisplayMode]);
 
   // Search highlighting helper
   const renderHighlightedText = (text: string) => {
     if (!searchQuery.trim()) return text;
-    const parts = text.split(new RegExp(`(${searchQuery})`, 'gi'));
+    const escaped = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const parts = text.split(new RegExp(`(${escaped})`, 'gi'));
     return parts.map((part, i) => 
       part.toLowerCase() === searchQuery.toLowerCase() ? (
         <mark key={i} className="bg-yellow-300 text-black px-0.5 rounded font-bold">{part}</mark>
@@ -635,7 +713,7 @@ export default function OriginalDocumentRenderer({
     if (!searchQuery.trim()) return 0;
     const q = searchQuery.toLowerCase();
     let matches = 0;
-    formattedSheets.forEach(sheet => {
+    activeSheets.forEach(sheet => {
       sheet.blocks.forEach(blk => {
         const t = blk.text.toLowerCase();
         let pos = 0;
@@ -646,7 +724,7 @@ export default function OriginalDocumentRenderer({
       });
     });
     return matches;
-  }, [searchQuery, formattedSheets]);
+  }, [searchQuery, activeSheets]);
 
   // Paper theme styles
   const paperThemeClasses = {
@@ -920,8 +998,43 @@ export default function OriginalDocumentRenderer({
             title="Toggle Table of Contents / Chapter Outline"
           >
             <List className="w-3.5 h-3.5" />
-            <span>Contents ({formattedSheets.length})</span>
+            <span>Contents ({activeSheets.length})</span>
           </button>
+
+          {/* Verbatim As-Uploaded vs Structured Chapters Switcher */}
+          <div className="flex bg-black/40 rounded-lg p-0.5 border border-white/10 text-[10px]">
+            <button
+              onClick={() => setTextDisplayMode('verbatim')}
+              className={`px-2.5 py-0.5 rounded transition-all cursor-pointer ${
+                textDisplayMode === 'verbatim' ? 'bg-emerald-600 text-white font-bold shadow' : 'text-gray-400 hover:text-white'
+              }`}
+              title="Display 100% of uploaded notes verbatim as-is (cover, intro, body, references)"
+            >
+              All Notes As Uploaded
+            </button>
+            <button
+              onClick={() => setTextDisplayMode('chapters')}
+              className={`px-2.5 py-0.5 rounded transition-all cursor-pointer ${
+                textDisplayMode === 'chapters' ? 'bg-indigo-600 text-white font-bold shadow' : 'text-gray-400 hover:text-white'
+              }`}
+              title="Display parsed chapter blocks"
+            >
+              Parsed Chapters
+            </button>
+          </div>
+
+          {isPdf && !pdfRenderError && (
+            <button
+              onClick={() => setPreferFullTextOverPdf(prev => !prev)}
+              className={`px-2.5 py-1 rounded-lg border text-[10px] font-bold transition-all cursor-pointer ${
+                preferFullTextOverPdf
+                  ? 'bg-amber-600/20 border-amber-400/40 text-amber-300'
+                  : 'bg-white/5 border-white/10 text-gray-300 hover:text-white'
+              }`}
+            >
+              {preferFullTextOverPdf ? 'Show Original PDF Pages' : 'Read Full Extracted Text'}
+            </button>
+          )}
 
           {/* Reading Mode Switcher: Paginated Sheets vs Continuous Scroll */}
           <div className="flex bg-black/40 rounded-lg p-0.5 border border-white/10 text-[10px]">
@@ -1108,7 +1221,7 @@ export default function OriginalDocumentRenderer({
           <div className="w-full flex flex-col items-center justify-center animate-fade-in">
             
             {/* SUB-CASE A: PDF RENDERED VIA PDF.JS CANVAS */}
-            {isPdf && !pdfRenderError ? (
+            {isPdf && !pdfRenderError && !preferFullTextOverPdf ? (
               <div className="w-full flex flex-col items-center gap-4">
                 {pdfNumPages > 0 && (
                   <div className="flex flex-wrap items-center justify-center gap-3 px-4 py-2 rounded-xl bg-slate-900/90 border border-white/10 text-xs text-gray-200 font-mono">
@@ -1185,7 +1298,17 @@ export default function OriginalDocumentRenderer({
             ) : (
               /* SUB-CASE C: AUTHENTIC ACADEMIC BOOK & DOCUMENT ENGINE (Text, Markdown, DOCX & Syllabus Modules) */
               <div className="w-full flex flex-col items-center justify-center relative">
-                
+                {isPdf && pdfRenderError && (
+                  <div className="w-full max-w-4xl mb-4 px-4 py-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center justify-between gap-3">
+                    <span>
+                      Displaying 100% of extracted document notes verbatim as uploaded (original cover, front matter, indicative contents, body & references).
+                    </span>
+                    <span className="font-mono text-[10px] opacity-80 shrink-0">
+                      {(doc.textContent || '').length.toLocaleString()} chars
+                    </span>
+                  </div>
+                )}
+
                 {/* Table of Contents Floating Drawer / Sidebar Popover */}
                 {showToc && (
                   <div className="w-full max-w-4xl mb-6 p-5 rounded-2xl bg-[#0f1824] border border-brand-primary/30 shadow-2xl text-left animate-fade-in font-sans">
@@ -1205,7 +1328,7 @@ export default function OriginalDocumentRenderer({
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-60 overflow-y-auto pr-1">
-                      {formattedSheets.map((sheet, sIdx) => {
+                      {activeSheets.map((sheet, sIdx) => {
                         const isCurrent = sIdx === textPageIndex;
                         return (
                           <button
@@ -1235,8 +1358,8 @@ export default function OriginalDocumentRenderer({
                 {/* Sheets Container: Supports Paginated Single Sheet or Continuous Scroll */}
                 <div className={`w-full max-w-4xl space-y-8 ${readingLayout === 'scroll' ? 'pb-16' : ''}`}>
                   {(readingLayout === 'paginated' 
-                    ? [formattedSheets[textPageIndex] || formattedSheets[0]] 
-                    : formattedSheets
+                    ? [activeSheets[textPageIndex] || activeSheets[0]] 
+                    : activeSheets
                   ).filter(Boolean).map((sheet, sheetDisplayIdx) => {
                     const actualSheetNum = readingLayout === 'paginated' ? textPageIndex + 1 : sheetDisplayIdx + 1;
 
@@ -1405,7 +1528,16 @@ export default function OriginalDocumentRenderer({
                               );
                             }
 
-                            // 7. Standard Formatted Paragraph
+                            // 7. Verbatim Raw Uploaded Block (preserves original spacing & formatting as uploaded)
+                            if (blk.type === 'verbatim') {
+                              return (
+                                <div key={blk.id} className="leading-relaxed opacity-95 whitespace-pre-wrap break-words font-normal tracking-normal">
+                                  {renderHighlightedText(blk.text)}
+                                </div>
+                              );
+                            }
+
+                            // 8. Standard Formatted Paragraph
                             return (
                               <p key={blk.id} className="leading-relaxed opacity-95 whitespace-pre-line">
                                 {renderHighlightedText(blk.text)}

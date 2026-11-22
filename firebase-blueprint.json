@@ -110,6 +110,75 @@
       },
       "required": ["id", "title", "category", "questions"]
     },
+    "OfficialExam": {
+      "title": "OfficialExam",
+      "description": "Administrator-created official timed and locked examination visible to all website users",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique exam ID" },
+        "title": { "type": "string", "description": "Exam title" },
+        "description": { "type": "string", "description": "Instructions or exam summary" },
+        "category": { "type": "string", "description": "Course category" },
+        "docId": { "type": "string", "description": "Optional linked course document ID" },
+        "createdBy": { "type": "string", "description": "Admin user ID" },
+        "createdAt": { "type": "string", "description": "Creation ISO timestamp" },
+        "updatedAt": { "type": "string", "description": "Last update ISO timestamp" },
+        "durationMinutes": { "type": "number", "description": "Countdown timer duration in minutes" },
+        "availableUntil": { "type": "string", "description": "Optional closing deadline ISO timestamp" },
+        "isPublished": { "type": "boolean", "description": "Whether exam is visible to all accounts" },
+        "isLocked": { "type": "boolean", "description": "Admin master lock flag" },
+        "accessCode": { "type": "string", "description": "Optional PIN code to start exam" },
+        "allowRetake": { "type": "boolean", "description": "Whether students can retake after submitting" },
+        "hideAfterSubmitOrExpiry": { "type": "boolean", "description": "Hide active exam after submission or timeout" },
+        "preventTabSwitch": { "type": "boolean", "description": "Block tab switching during exam" },
+        "maxTabSwitches": { "type": "number", "description": "Allowed switches before auto-submit" },
+        "preventCopyPaste": { "type": "boolean", "description": "Disable copy/cut/paste/selection during exam" },
+        "requireFullscreen": { "type": "boolean", "description": "Require fullscreen mode during exam" },
+        "passingScorePercent": { "type": "number", "description": "Minimum passing percentage" },
+        "showResultsAfterSubmit": { "type": "boolean", "description": "Reveal score breakdown after submission" },
+        "questions": { "type": "array", "description": "Exam questions array" }
+      },
+      "required": ["id", "title", "category", "durationMinutes", "questions"]
+    },
+    "ExamSession": {
+      "title": "ExamSession",
+      "description": "Active countdown and violation tracking session for an examinee",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Composite examId__userId" },
+        "examId": { "type": "string", "description": "Exam ID" },
+        "userId": { "type": "string", "description": "Student user ID" },
+        "startedAt": { "type": "string", "description": "Server start ISO timestamp" },
+        "expiresAt": { "type": "string", "description": "Server expiry ISO timestamp" },
+        "tabSwitchCount": { "type": "number", "description": "Recorded tab switch violations" },
+        "status": { "type": "string", "description": "active, submitted, or expired" }
+      },
+      "required": ["id", "examId", "userId", "startedAt", "expiresAt", "status"]
+    },
+    "ExamSubmission": {
+      "title": "ExamSubmission",
+      "description": "Graded official exam submission record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Submission ID" },
+        "examId": { "type": "string", "description": "Exam ID" },
+        "examTitle": { "type": "string", "description": "Exam title" },
+        "category": { "type": "string", "description": "Course category" },
+        "userId": { "type": "string", "description": "Student user ID" },
+        "username": { "type": "string", "description": "Student display name" },
+        "userEmail": { "type": "string", "description": "Student email" },
+        "score": { "type": "number", "description": "Points earned" },
+        "maxScore": { "type": "number", "description": "Total questions" },
+        "percentage": { "type": "number", "description": "Percentage score" },
+        "passed": { "type": "boolean", "description": "Whether student passed" },
+        "submittedAt": { "type": "string", "description": "Submission ISO timestamp" },
+        "autoSubmitted": { "type": "boolean", "description": "Whether submitted automatically" },
+        "autoSubmitReason": { "type": "string", "description": "Reason for auto submission" },
+        "tabSwitchCount": { "type": "number", "description": "Detected tab switches" },
+        "timeTakenSeconds": { "type": "number", "description": "Time taken in seconds" }
+      },
+      "required": ["id", "examId", "userId", "score", "maxScore", "submittedAt"]
+    },
     "Flashcard": {
       "title": "Flashcard",
       "description": "Study flashcard",
@@ -151,6 +220,18 @@
     "/quizzes/{quizId}": {
       "schema": "Quiz",
       "description": "Course quizzes and self-assessments"
+    },
+    "/exams/{examId}": {
+      "schema": "OfficialExam",
+      "description": "Official admin-created timed and locked exams"
+    },
+    "/exam_sessions/{sessionId}": {
+      "schema": "ExamSession",
+      "description": "Active countdown and proctoring sessions"
+    },
+    "/exam_submissions/{submissionId}": {
+      "schema": "ExamSubmission",
+      "description": "Graded student exam submissions"
     },
     "/flashcards/{flashcardId}": {
       "schema": "Flashcard",

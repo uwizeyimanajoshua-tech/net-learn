@@ -9,7 +9,7 @@ import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { db, sqlClient, syncFromFirestore, syncDocumentsIfStale, syncAppCollectionsIfStale, hasBrokenCurriculumStubs } from './src/db/store.js';
 import { CATEGORIES } from './src/types.js';
-import type { ChatMessage, ChatSession, Document, DocumentSection, AISummary, Quiz, QuizQuestion, Flashcard } from './src/types.js';
+import type { ChatMessage, ChatSession, Document, DocumentSection, AISummary, Quiz, QuizQuestion, Flashcard, OfficialExam, ExamSession, ExamSubmission } from './src/types.js';
 
 dotenv.config();
 
@@ -864,8 +864,28 @@ function formatAndPartitionLikeWindowServer(
         images: []
       };
 
+      // Preserve uploaded front-matter (cover page, copyright, acknowledgements, acronyms, general introduction)
+      const frontMatterClean = cleanPdfWatermark(frontSlice);
+      const frontSections: DocumentSection[] = [];
+      if (frontMatterClean.length >= 60) {
+        frontSections.push({
+          id: `sec_${Date.now()}_front`,
+          title: 'Front Matter, Cover & Introduction (As Uploaded)',
+          content: `# Cover, Front Matter & Introduction: ${docBaseName}\n\n` + frontMatterClean,
+          pageNumber: 2,
+          manualPage: 'i',
+          images: []
+        });
+      }
+
+      const offset = frontSections.length;
+      const reindexedBody = bodySections.map((sec, idx) => ({
+        ...sec,
+        pageNumber: idx + 2 + offset
+      }));
+
       return {
-        sections: [tocSection, ...bodySections],
+        sections: [tocSection, ...frontSections, ...reindexedBody],
         images: generatedImages,
         hasDrawings: true
       };
@@ -1409,7 +1429,19 @@ app.get('/api/documents/:id', async (req, res) => {
     doc = db.getDocumentById(req.params.id);
   }
   if (!doc) return res.status(404).json({ error: 'Document not found' });
-  res.json({ document: doc });
+
+  // Synthesize full textContent fallback if a legacy seeded doc only stored splitContent
+  const hasRichText = Boolean(doc.textContent && doc.textContent.trim().length >= 40);
+  const responseDoc = hasRichText
+    ? doc
+    : {
+        ...doc,
+        textContent: (doc.splitContent || [])
+          .map((sec) => `${sec.title ? `# ${sec.title}\n\n` : ''}${sec.content || ''}`)
+          .join('\n\n---\n\n')
+      };
+
+  res.json({ document: responseDoc });
 });
 
 // Robust admin verification supporting email, headers, body, and stored profiles
@@ -3842,6 +3874,603 @@ app.get('/api/quizzes/:id', async (req, res) => {
   }
   if (!q) return res.status(404).json({ error: 'Quiz not found' });
   res.json(q);
+});
+
+// =============================================================
+// OFFICIAL ADMIN-PREPARED EXAMS (TIMED, LOCKED & PROCTORED)
+// =============================================================
+function checkIsExamAdmin(req: express.Request, bodyUserId?: string): boolean {
+  const userEmailHeader = String(req.headers['x-user-email'] || '').toLowerCase().trim();
+  const bodyEmail = String(req.body?.userEmail || '').toLowerCase().trim();
+  const queryEmail = String(req.query?.userEmail || '').toLowerCase().trim();
+  const userRoleHeader = String(req.headers['x-user-role'] || req.body?.userRole || '').toLowerCase().trim();
+  const userId = String(bodyUserId || req.body?.userId || req.query?.userId || req.headers['x-user-id'] || '').trim();
+
+  if (
+    userEmailHeader === 'uwizeyimanajoshua@gmail.com' ||
+    bodyEmail === 'uwizeyimanajoshua@gmail.com' ||
+    queryEmail === 'uwizeyimanajoshua@gmail.com'
+  ) {
+    return true;
+  }
+  if (userId === 'usr_admin') return true;
+
+  if (userId) {
+    const storedUser = db.getUserById(userId);
+    if (storedUser) {
+      if (
+        storedUser.email?.toLowerCase() === 'uwizeyimanajoshua@gmail.com' ||
+        storedUser.role === 'admin' ||
+        storedUser.role === 'teacher'
+      ) {
+        return true;
+      }
+      return false;
+    }
+  }
+
+  if (userRoleHeader === 'admin' || userRoleHeader === 'teacher') {
+    return true;
+  }
+
+  return false;
+}
+
+function stripExamAnswerKeys(exam: OfficialExam, includeAnswers: boolean) {
+  return {
+    ...exam,
+    accessCode: exam.accessCode ? 'PROTECTED' : undefined,
+    hasAccessCode: Boolean(exam.accessCode && exam.accessCode.trim().length > 0),
+    questions: (exam.questions || []).map((q) => {
+      if (includeAnswers) return q;
+      const { answer: _ans, explanation: _exp, ...safeQuestion } = q;
+      return safeQuestion;
+    })
+  };
+}
+
+async function autoExpireExamSessionIfNeeded(exam: OfficialExam, userId: string): Promise<ExamSubmission | undefined> {
+  const existingSub = db.getExamSubmissionByUser(exam.id, userId);
+  if (existingSub && !exam.allowRetake) return existingSub;
+
+  const session = db.getExamSession(exam.id, userId);
+  if (!session || session.status !== 'active') return existingSub;
+
+  const nowMs = Date.now();
+  const expiresMs = new Date(session.expiresAt).getTime();
+  const deadlineMs = exam.availableUntil ? new Date(exam.availableUntil).getTime() : Number.POSITIVE_INFINITY;
+
+  if (nowMs < Math.min(expiresMs, deadlineMs)) {
+    return existingSub;
+  }
+
+  // Time or deadline elapsed while student was away -> auto-submit saved draft and hide
+  const draft = session.answersDraft || {};
+  let score = 0;
+  for (const q of exam.questions || []) {
+    if (draft[q.id] === q.answer) score++;
+  }
+  const maxScore = Math.max((exam.questions || []).length, 1);
+  const percentage = Math.round((score / maxScore) * 100);
+  const userObj = db.getUserById(userId);
+  const reason: 'time_expired' | 'deadline_passed' =
+    nowMs >= deadlineMs ? 'deadline_passed' : 'time_expired';
+
+  const autoSub: ExamSubmission = {
+    id: `esub_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    examId: exam.id,
+    examTitle: exam.title,
+    category: exam.category,
+    userId,
+    username: userObj?.username || 'Student',
+    userEmail: userObj?.email || '',
+    answers: draft,
+    score,
+    maxScore,
+    percentage,
+    passed: percentage >= (exam.passingScorePercent || 50),
+    timeTakenSeconds: Math.max(0, Math.round((nowMs - new Date(session.startedAt).getTime()) / 1000)),
+    tabSwitchCount: session.tabSwitchCount || 0,
+    autoSubmitted: true,
+    autoSubmitReason: reason,
+    submittedAt: new Date().toISOString()
+  };
+
+  await db.createExamSubmission(autoSub);
+  await db.upsertExamSession({
+    ...session,
+    status: 'expired',
+    updatedAt: new Date().toISOString()
+  });
+  const curPrg = db.getProgressByUserId(userId);
+  db.updateProgress(userId, {
+    quizScores: [
+      {
+        quizId: exam.id,
+        quizTitle: `Official Exam: ${exam.title}`,
+        category: exam.category,
+        score,
+        maxScore,
+        date: autoSub.submittedAt
+      },
+      ...(curPrg.quizScores || [])
+    ].slice(0, 100)
+  });
+
+  return autoSub;
+}
+
+// 1. GET /api/exams - List official exams tailored to requester role & user account
+app.get('/api/exams', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try { await syncAppCollectionsIfStale(8000); } catch {}
+
+  const userId = String(req.query.userId || req.headers['x-user-id'] || '').trim();
+  const isAdmin = checkIsExamAdmin(req, userId);
+  const allExams = db.getExams();
+  const nowMs = Date.now();
+
+  const results = [];
+  for (const exam of allExams) {
+    if (!isAdmin && !exam.isPublished) continue;
+
+    let userSub = userId ? await autoExpireExamSessionIfNeeded(exam, userId) : undefined;
+    const session = userId ? db.getExamSession(exam.id, userId) : undefined;
+    const allSubs = db.getExamSubmissions(exam.id);
+    const isDeadlinePassed = Boolean(exam.availableUntil && nowMs >= new Date(exam.availableUntil).getTime());
+
+    let remainingSeconds = (exam.durationMinutes || 30) * 60;
+    if (session && session.status === 'active') {
+      const capMs = exam.availableUntil
+        ? Math.min(new Date(session.expiresAt).getTime(), new Date(exam.availableUntil).getTime())
+        : new Date(session.expiresAt).getTime();
+      remainingSeconds = Math.max(0, Math.floor((capMs - nowMs) / 1000));
+    }
+
+    const hasSubmitted = Boolean(userSub);
+    const shouldHideContent =
+      !isAdmin &&
+      Boolean(exam.hideAfterSubmitOrExpiry) &&
+      ((hasSubmitted && !exam.allowRetake) || isDeadlinePassed || session?.status === 'expired');
+
+    if (isAdmin) {
+      results.push({
+        ...exam,
+        submissionCount: allSubs.length,
+        hasSubmitted,
+        userSubmission: userSub,
+        activeSession: session && session.status === 'active' ? session : undefined,
+        remainingSeconds,
+        isDeadlinePassed,
+        expiredOrSubmittedHidden: false
+      });
+    } else if (shouldHideContent) {
+      // Disappear exam questions once submitted/expired per admin setting, keeping compact completion status
+      const safeExam = stripExamAnswerKeys(exam, Boolean(hasSubmitted && exam.showResultsAfterSubmit));
+      results.push({
+        ...safeExam,
+        questions: [],
+        questionCount: (exam.questions || []).length,
+        hasSubmitted,
+        userSubmission: exam.showResultsAfterSubmit ? userSub : (userSub ? {
+          id: userSub.id,
+          examId: userSub.examId,
+          submittedAt: userSub.submittedAt,
+          autoSubmitted: userSub.autoSubmitted,
+          autoSubmitReason: userSub.autoSubmitReason
+        } : undefined),
+        remainingSeconds: 0,
+        isDeadlinePassed,
+        expiredOrSubmittedHidden: true
+      });
+    } else {
+      const includeKeys = Boolean(hasSubmitted && exam.showResultsAfterSubmit);
+      const safeExam = stripExamAnswerKeys(exam, includeKeys);
+      results.push({
+        ...safeExam,
+        questionCount: (exam.questions || []).length,
+        hasSubmitted,
+        userSubmission: userSub,
+        activeSession: session && session.status === 'active' ? session : undefined,
+        remainingSeconds,
+        isDeadlinePassed,
+        expiredOrSubmittedHidden: false
+      });
+    }
+  }
+
+  res.json({ exams: results });
+});
+
+// 2. POST /api/exams - Admin creates a new official exam
+app.post('/api/exams', async (req, res) => {
+  if (!checkIsExamAdmin(req, req.body?.userId)) {
+    return res.status(403).json({ error: 'Permission Denied: Only administrators can create or publish official exams.' });
+  }
+
+  const {
+    title,
+    description,
+    category,
+    docId,
+    questions,
+    durationMinutes,
+    availableUntil,
+    isPublished,
+    isLocked,
+    accessCode,
+    preventTabSwitch,
+    maxTabSwitches,
+    preventCopyPaste,
+    requireFullscreen,
+    allowRetake,
+    hideAfterSubmitOrExpiry,
+    passingScorePercent,
+    showResultsAfterSubmit,
+    userId,
+    userEmail
+  } = req.body || {};
+
+  if (!title || !String(title).trim()) {
+    return res.status(400).json({ error: 'Exam title is required.' });
+  }
+  if (!Array.isArray(questions) || questions.length === 0) {
+    return res.status(400).json({ error: 'Please include at least one question in the official exam.' });
+  }
+
+  const normalizedQuestions: QuizQuestion[] = questions.map((q: any, idx: number) => {
+    const opts = Array.isArray(q.options) && q.options.length >= 2
+      ? q.options.map((o: any) => String(o))
+      : ['Option A', 'Option B', 'Option C', 'Option D'];
+    const rawAns = Number(q.answer);
+    const ansIdx = Number.isFinite(rawAns) && rawAns >= 0 && rawAns < opts.length ? rawAns : 0;
+    return {
+      id: q.id ? String(q.id) : `eq_${Date.now()}_${idx + 1}`,
+      question: String(q.question || `Question ${idx + 1}`).trim(),
+      options: opts,
+      answer: ansIdx,
+      explanation: String(q.explanation || 'Evaluated against course curriculum standards.'),
+      hint: q.hint ? String(q.hint) : undefined,
+      topicTag: String(q.topicTag || category || 'General')
+    };
+  });
+
+  const nowIso = new Date().toISOString();
+  const newExam: OfficialExam = {
+    id: `exam_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    title: String(title).trim(),
+    description: description ? String(description).trim() : '',
+    category: (CATEGORIES.includes(category) ? category : 'Networking') as OfficialExam['category'],
+    docId: docId ? String(docId) : undefined,
+    questions: normalizedQuestions,
+    durationMinutes: Math.max(1, Math.min(360, Number(durationMinutes) || 30)),
+    availableUntil: availableUntil ? String(availableUntil) : undefined,
+    isPublished: isPublished !== false,
+    isLocked: Boolean(isLocked),
+    accessCode: accessCode ? String(accessCode).trim() : undefined,
+    preventTabSwitch: preventTabSwitch !== false,
+    maxTabSwitches: Math.max(1, Math.min(10, Number(maxTabSwitches) || 1)),
+    preventCopyPaste: preventCopyPaste !== false,
+    requireFullscreen: Boolean(requireFullscreen),
+    allowRetake: Boolean(allowRetake),
+    hideAfterSubmitOrExpiry: hideAfterSubmitOrExpiry !== false,
+    passingScorePercent: Math.max(1, Math.min(100, Number(passingScorePercent) || 50)),
+    showResultsAfterSubmit: showResultsAfterSubmit !== false,
+    createdBy: String(userEmail || userId || 'admin'),
+    createdAt: nowIso,
+    updatedAt: nowIso
+  };
+
+  await db.createExam(newExam);
+  res.json({ exam: newExam });
+});
+
+// 3. PUT /api/exams/:id - Admin updates exam config, lock state, timer, or questions
+app.put('/api/exams/:id', async (req, res) => {
+  if (!checkIsExamAdmin(req, req.body?.userId)) {
+    return res.status(403).json({ error: 'Permission Denied: Only administrators can modify official exams.' });
+  }
+
+  let existing = db.getExamById(req.params.id);
+  if (!existing) {
+    try { await syncAppCollectionsIfStale(0); } catch {}
+    existing = db.getExamById(req.params.id);
+  }
+  if (!existing) return res.status(404).json({ error: 'Official exam not found.' });
+
+  const patch: Partial<OfficialExam> = {};
+  const b = req.body || {};
+
+  if (b.title !== undefined) patch.title = String(b.title).trim();
+  if (b.description !== undefined) patch.description = String(b.description).trim();
+  if (b.category !== undefined && CATEGORIES.includes(b.category)) patch.category = b.category;
+  if (b.docId !== undefined) patch.docId = b.docId ? String(b.docId) : undefined;
+  if (b.durationMinutes !== undefined) patch.durationMinutes = Math.max(1, Math.min(360, Number(b.durationMinutes) || 30));
+  if (b.availableUntil !== undefined) patch.availableUntil = b.availableUntil ? String(b.availableUntil) : undefined;
+  if (b.isPublished !== undefined) patch.isPublished = Boolean(b.isPublished);
+  if (b.isLocked !== undefined) patch.isLocked = Boolean(b.isLocked);
+  if (b.accessCode !== undefined) patch.accessCode = b.accessCode ? String(b.accessCode).trim() : undefined;
+  if (b.preventTabSwitch !== undefined) patch.preventTabSwitch = Boolean(b.preventTabSwitch);
+  if (b.maxTabSwitches !== undefined) patch.maxTabSwitches = Math.max(1, Math.min(10, Number(b.maxTabSwitches) || 1));
+  if (b.preventCopyPaste !== undefined) patch.preventCopyPaste = Boolean(b.preventCopyPaste);
+  if (b.requireFullscreen !== undefined) patch.requireFullscreen = Boolean(b.requireFullscreen);
+  if (b.allowRetake !== undefined) patch.allowRetake = Boolean(b.allowRetake);
+  if (b.hideAfterSubmitOrExpiry !== undefined) patch.hideAfterSubmitOrExpiry = Boolean(b.hideAfterSubmitOrExpiry);
+  if (b.passingScorePercent !== undefined) patch.passingScorePercent = Math.max(1, Math.min(100, Number(b.passingScorePercent) || 50));
+  if (b.showResultsAfterSubmit !== undefined) patch.showResultsAfterSubmit = Boolean(b.showResultsAfterSubmit);
+
+  if (Array.isArray(b.questions) && b.questions.length > 0) {
+    patch.questions = b.questions.map((q: any, idx: number) => {
+      const opts = Array.isArray(q.options) && q.options.length >= 2
+        ? q.options.map((o: any) => String(o))
+        : ['Option A', 'Option B', 'Option C', 'Option D'];
+      const rawAns = Number(q.answer);
+      const ansIdx = Number.isFinite(rawAns) && rawAns >= 0 && rawAns < opts.length ? rawAns : 0;
+      return {
+        id: q.id ? String(q.id) : `eq_${Date.now()}_${idx + 1}`,
+        question: String(q.question || `Question ${idx + 1}`).trim(),
+        options: opts,
+        answer: ansIdx,
+        explanation: String(q.explanation || 'Evaluated against course curriculum standards.'),
+        hint: q.hint ? String(q.hint) : undefined,
+        topicTag: String(q.topicTag || existing!.category || 'General')
+      };
+    });
+  }
+
+  const updated = await db.updateExam(req.params.id, patch);
+  res.json({ exam: updated });
+});
+
+// 4. DELETE /api/exams/:id - Admin deletes an official exam
+app.delete('/api/exams/:id', async (req, res) => {
+  const userId = String(req.query.userId || req.body?.userId || req.headers['x-user-id'] || '').trim();
+  if (!checkIsExamAdmin(req, userId)) {
+    return res.status(403).json({ error: 'Permission Denied: Only administrators can delete official exams.' });
+  }
+  const deleted = await db.deleteExam(req.params.id);
+  if (!deleted) return res.status(404).json({ error: 'Official exam not found.' });
+  res.json({ success: true });
+});
+
+// 5. POST /api/exams/:id/start - Start or resume a server-anchored timed exam session
+app.post('/api/exams/:id/start', async (req, res) => {
+  try { await syncAppCollectionsIfStale(5000); } catch {}
+  const exam = db.getExamById(req.params.id);
+  if (!exam) return res.status(404).json({ error: 'Official exam not found.' });
+
+  const { userId, accessCode } = req.body || {};
+  const uid = String(userId || req.headers['x-user-id'] || '').trim();
+  if (!uid) return res.status(400).json({ error: 'You must be signed in with an account to take this exam.' });
+
+  const isAdmin = checkIsExamAdmin(req, uid);
+  if (!exam.isPublished && !isAdmin) {
+    return res.status(403).json({ error: 'This exam is not currently published.' });
+  }
+  if (exam.isLocked && !isAdmin) {
+    return res.status(423).json({ error: 'This exam is currently LOCKED by the administrator. Please wait until it is unlocked.' });
+  }
+
+  const nowMs = Date.now();
+  if (exam.availableUntil && nowMs >= new Date(exam.availableUntil).getTime()) {
+    await autoExpireExamSessionIfNeeded(exam, uid);
+    return res.status(410).json({ error: 'The deadline for this exam has already passed and it is now closed.' });
+  }
+
+  if (exam.accessCode && exam.accessCode.trim() && !isAdmin) {
+    if (String(accessCode || '').trim() !== exam.accessCode.trim()) {
+      return res.status(403).json({ error: 'Invalid exam unlock PIN / access code.' });
+    }
+  }
+
+  const existingSub = db.getExamSubmissionByUser(exam.id, uid);
+  if (existingSub && !exam.allowRetake) {
+    return res.status(409).json({ error: 'You have already completed this exam. Retakes are disabled by the administrator.' });
+  }
+
+  let session = db.getExamSession(exam.id, uid);
+  if (session && session.status === 'expired' && !exam.allowRetake) {
+    return res.status(410).json({ error: 'Your time for this exam has expired and it was automatically submitted.' });
+  }
+
+  if (!session || session.status !== 'active' || (existingSub && exam.allowRetake && session.status !== 'active')) {
+    const durationMs = (exam.durationMinutes || 30) * 60 * 1000;
+    const deadlineMs = exam.availableUntil ? new Date(exam.availableUntil).getTime() : Number.POSITIVE_INFINITY;
+    const expiresAtMs = Math.min(nowMs + durationMs, deadlineMs);
+
+    session = {
+      id: `esess_${exam.id}_${uid}`,
+      examId: exam.id,
+      userId: uid,
+      startedAt: new Date(nowMs).toISOString(),
+      expiresAt: new Date(expiresAtMs).toISOString(),
+      status: 'active',
+      tabSwitchCount: 0,
+      answersDraft: {},
+      updatedAt: new Date(nowMs).toISOString()
+    };
+    await db.upsertExamSession(session);
+  }
+
+  const deadlineCap = exam.availableUntil
+    ? Math.min(new Date(session.expiresAt).getTime(), new Date(exam.availableUntil).getTime())
+    : new Date(session.expiresAt).getTime();
+  const remainingSeconds = Math.max(0, Math.floor((deadlineCap - nowMs) / 1000));
+
+  if (remainingSeconds <= 0) {
+    await autoExpireExamSessionIfNeeded(exam, uid);
+    return res.status(410).json({ error: 'Time for this exam has expired and your attempt has been submitted automatically.' });
+  }
+
+  res.json({
+    exam: stripExamAnswerKeys(exam, false),
+    session,
+    remainingSeconds
+  });
+});
+
+// 6. POST /api/exams/:id/draft - Persist in-progress answers (protects auto-submit if tab closes)
+app.post('/api/exams/:id/draft', async (req, res) => {
+  const { userId, answers } = req.body || {};
+  const uid = String(userId || req.headers['x-user-id'] || '').trim();
+  if (!uid) return res.status(400).json({ error: 'Missing userId' });
+
+  const session = db.getExamSession(req.params.id, uid);
+  if (!session || session.status !== 'active') {
+    return res.json({ saved: false });
+  }
+  await db.upsertExamSession({
+    ...session,
+    answersDraft: answers && typeof answers === 'object' ? answers : session.answersDraft,
+    updatedAt: new Date().toISOString()
+  });
+  res.json({ saved: true });
+});
+
+// 7. POST /api/exams/:id/violation - Record tab-switch / fullscreen-exit violation
+app.post('/api/exams/:id/violation', async (req, res) => {
+  const exam = db.getExamById(req.params.id);
+  if (!exam) return res.status(404).json({ error: 'Exam not found.' });
+
+  const { userId } = req.body || {};
+  const uid = String(userId || req.headers['x-user-id'] || '').trim();
+  if (!uid) return res.status(400).json({ error: 'Missing userId' });
+
+  const session = db.getExamSession(exam.id, uid);
+  if (!session || session.status !== 'active') {
+    return res.json({ tabSwitchCount: 0, maxTabSwitches: exam.maxTabSwitches || 1, shouldAutoSubmit: false });
+  }
+
+  const nextCount = (session.tabSwitchCount || 0) + 1;
+  await db.upsertExamSession({
+    ...session,
+    tabSwitchCount: nextCount,
+    updatedAt: new Date().toISOString()
+  });
+
+  const maxAllowed = Math.max(1, exam.maxTabSwitches || 1);
+  res.json({
+    tabSwitchCount: nextCount,
+    maxTabSwitches: maxAllowed,
+    shouldAutoSubmit: Boolean(exam.preventTabSwitch) && nextCount >= maxAllowed
+  });
+});
+
+// 8. POST /api/exams/:id/submit - Server-side grading & session lock/disappear
+app.post('/api/exams/:id/submit', async (req, res) => {
+  const exam = db.getExamById(req.params.id);
+  if (!exam) return res.status(404).json({ error: 'Official exam not found.' });
+
+  const { userId, answers, autoSubmitted, autoSubmitReason, tabSwitchCount } = req.body || {};
+  const uid = String(userId || req.headers['x-user-id'] || '').trim();
+  if (!uid) return res.status(400).json({ error: 'Missing userId' });
+
+  const existingSub = db.getExamSubmissionByUser(exam.id, uid);
+  if (existingSub && !exam.allowRetake) {
+    return res.json({
+      submission: exam.showResultsAfterSubmit ? existingSub : { id: existingSub.id, examId: existingSub.examId, submittedAt: existingSub.submittedAt, autoSubmitted: existingSub.autoSubmitted },
+      showResults: Boolean(exam.showResultsAfterSubmit),
+      reviewQuestions: exam.showResultsAfterSubmit ? exam.questions : undefined,
+      alreadySubmitted: true
+    });
+  }
+
+  const submittedAnswers: Record<string, number> = answers && typeof answers === 'object' ? answers : {};
+  let score = 0;
+  for (const q of exam.questions || []) {
+    if (submittedAnswers[q.id] === q.answer) {
+      score++;
+    }
+  }
+  const maxScore = Math.max((exam.questions || []).length, 1);
+  const percentage = Math.round((score / maxScore) * 100);
+  const userObj = db.getUserById(uid);
+  const session = db.getExamSession(exam.id, uid);
+  const startedMs = session?.startedAt ? new Date(session.startedAt).getTime() : Date.now();
+  const timeTakenSeconds = Math.max(1, Math.round((Date.now() - startedMs) / 1000));
+  const finalViolations = Math.max(Number(tabSwitchCount) || 0, session?.tabSwitchCount || 0);
+
+  const sub: ExamSubmission = {
+    id: `esub_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    examId: exam.id,
+    examTitle: exam.title,
+    category: exam.category,
+    userId: uid,
+    username: userObj?.username || String(req.body?.username || 'Student'),
+    userEmail: userObj?.email || String(req.body?.userEmail || ''),
+    answers: submittedAnswers,
+    score,
+    maxScore,
+    percentage,
+    passed: percentage >= (exam.passingScorePercent || 50),
+    timeTakenSeconds,
+    tabSwitchCount: finalViolations,
+    autoSubmitted: Boolean(autoSubmitted),
+    autoSubmitReason: autoSubmitted ? (autoSubmitReason || 'time_expired') : 'manual',
+    submittedAt: new Date().toISOString()
+  };
+
+  await db.createExamSubmission(sub);
+
+  if (session) {
+    await db.upsertExamSession({
+      ...session,
+      status: autoSubmitted && (autoSubmitReason === 'time_expired' || autoSubmitReason === 'deadline_passed') ? 'expired' : 'submitted',
+      tabSwitchCount: finalViolations,
+      answersDraft: submittedAnswers,
+      updatedAt: new Date().toISOString()
+    });
+  }
+
+  const curPrg = db.getProgressByUserId(uid);
+  db.updateProgress(uid, {
+    quizScores: [
+      {
+        quizId: exam.id,
+        quizTitle: `Official Exam: ${exam.title}`,
+        category: exam.category,
+        score,
+        maxScore,
+        date: sub.submittedAt
+      },
+      ...(curPrg.quizScores || [])
+    ].slice(0, 100)
+  });
+
+  res.json({
+    submission: exam.showResultsAfterSubmit ? sub : {
+      id: sub.id,
+      examId: sub.examId,
+      examTitle: sub.examTitle,
+      submittedAt: sub.submittedAt,
+      autoSubmitted: sub.autoSubmitted,
+      autoSubmitReason: sub.autoSubmitReason
+    },
+    showResults: Boolean(exam.showResultsAfterSubmit),
+    reviewQuestions: exam.showResultsAfterSubmit ? exam.questions : undefined
+  });
+});
+
+// 9. GET /api/exams/:id/submissions - Admin inspects all student scores & violations
+app.get('/api/exams/:id/submissions', async (req, res) => {
+  const userId = String(req.query.userId || req.headers['x-user-id'] || '').trim();
+  if (!checkIsExamAdmin(req, userId)) {
+    return res.status(403).json({ error: 'Permission Denied: Only administrators can view exam submissions.' });
+  }
+  try { await syncAppCollectionsIfStale(5000); } catch {}
+  const subs = db.getExamSubmissions(req.params.id);
+  res.json({ submissions: subs });
+});
+
+// 10. DELETE /api/exams/:id/submissions/:subId - Admin resets a student attempt so they can retake
+app.delete('/api/exams/:id/submissions/:subId', async (req, res) => {
+  const userId = String(req.query.userId || req.body?.userId || req.headers['x-user-id'] || '').trim();
+  if (!checkIsExamAdmin(req, userId)) {
+    return res.status(403).json({ error: 'Permission Denied: Only administrators can reset exam submissions.' });
+  }
+  const ok = await db.deleteExamSubmission(req.params.subId);
+  if (!ok) return res.status(404).json({ error: 'Submission not found.' });
+  res.json({ success: true });
 });
 
 // Targeted Section/Chapter Practice Question Generator
