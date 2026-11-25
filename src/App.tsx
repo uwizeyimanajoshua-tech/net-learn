@@ -21,7 +21,7 @@ import PythonSimulator from './components/PythonSimulator.js';
 import CProgrammingIDE from './components/CProgrammingIDE.js';
 import VideoLectures from './components/VideoLectures.js';
 import { collection, getDocs } from 'firebase/firestore';
-import { db as firestoreDb, handleFirestoreError, OperationType } from './firebase.js';
+import { db as firestoreDb, ensureFirestoreOnline, handleFirestoreError, OperationType } from './firebase.js';
 import { Document, StudentProgress, CategoryName, CATEGORIES } from './types.js';
 import { SIDEBAR_CATEGORIES } from './data/chapters.js';
 import netLearnLogo from './assets/images/net_learn_logo_1784436382187.jpg';
@@ -268,12 +268,15 @@ export default function App() {
     // Fallback: Direct Firebase Firestore read if API returned error or unavailable
     if (!loadedDocs) {
       try {
-        const snapshot = await getDocs(collection(firestoreDb, 'documents'));
-        const fsDocs: Document[] = [];
-        snapshot.forEach(docSnap => {
-          fsDocs.push(docSnap.data() as Document);
-        });
-        loadedDocs = fsDocs;
+        const isOnline = await ensureFirestoreOnline();
+        if (isOnline) {
+          const snapshot = await getDocs(collection(firestoreDb, 'documents'));
+          const fsDocs: Document[] = [];
+          snapshot.forEach(docSnap => {
+            fsDocs.push(docSnap.data() as Document);
+          });
+          loadedDocs = fsDocs;
+        }
       } catch (fsErr: any) {
         try {
           handleFirestoreError(fsErr, OperationType.GET, 'documents');

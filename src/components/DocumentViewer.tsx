@@ -6,7 +6,7 @@ import PythonSimulator from './PythonSimulator.js';
 import OriginalDocumentRenderer from './OriginalDocumentRenderer.js';
 import W3SchoolsNoteViewer from './W3SchoolsNoteViewer.js';
 import { doc as fsDoc, getDoc } from 'firebase/firestore';
-import { db as firestoreDb, handleFirestoreError, OperationType } from '../firebase.js';
+import { db as firestoreDb, ensureFirestoreOnline, handleFirestoreError, OperationType } from '../firebase.js';
 import * as pdfjsLib from 'pdfjs-dist';
 
 if (typeof window !== 'undefined' && pdfjsLib.GlobalWorkerOptions) {
@@ -368,9 +368,12 @@ export default function DocumentViewer({
 
       if (!fullDoc) {
         try {
-          const snap = await getDoc(fsDoc(firestoreDb, 'documents', docItem.id));
-          if (snap.exists()) {
-            fullDoc = snap.data() as Document;
+          const isOnline = await ensureFirestoreOnline();
+          if (isOnline) {
+            const snap = await getDoc(fsDoc(firestoreDb, 'documents', docItem.id));
+            if (snap.exists()) {
+              fullDoc = snap.data() as Document;
+            }
           }
         } catch (fsErr) {
           try {

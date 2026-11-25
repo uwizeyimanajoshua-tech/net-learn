@@ -30,7 +30,7 @@ try {
     const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
     try {
       dbFirestore = initializeFirestore(app, {
-        experimentalAutoDetectLongPolling: true,
+        experimentalForceLongPolling: true,
         localCache: memoryLocalCache(),
       }, firebaseConfig.firestoreDatabaseId);
     } catch {

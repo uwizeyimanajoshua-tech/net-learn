@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut as fbSignOut, User as FirebaseUser } from 'firebase/auth';
-import { initializeFirestore, getFirestore, memoryLocalCache, setLogLevel, doc, getDocFromServer, collection, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, where } from 'firebase/firestore';
+import { initializeFirestore, getFirestore, memoryLocalCache, setLogLevel, disableNetwork, enableNetwork, doc, getDocFromServer } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 // Suppress non-fatal internal Firestore SDK WARN fallback notices (e.g., BloomFilter hash count fallback)
@@ -9,11 +9,11 @@ setLogLevel('error');
 // Initialize Firebase client instance
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// Database instance explicitly configured with long polling auto-detection and fresh memory cache
+// Database instance explicitly configured with forced HTTP long-polling (prevents 10s WebChannel hangs in proxies/iFrames) and fresh memory cache
 let firestoreInstance;
 try {
   firestoreInstance = initializeFirestore(app, {
-    experimentalAutoDetectLongPolling: true,
+    experimentalForceLongPolling: true,
     localCache: memoryLocalCache(),
   }, firebaseConfig.firestoreDatabaseId);
 } catch {
@@ -22,6 +22,35 @@ try {
 export const db = firestoreInstance;
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
+
+let networkDisabledDueToTimeout = false;
+
+export async function ensureFirestoreOnline() {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return false;
+  }
+  if (networkDisabledDueToTimeout) {
+    try {
+      await enableNetwork(db);
+      networkDisabledDueToTimeout = false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    if (networkDisabledDueToTimeout) {
+      enableNetwork(db)
+        .then(() => {
+          networkDisabledDueToTimeout = false;
+        })
+        .catch(() => {});
+    }
+  });
+}
 
 // Error handler adhering to Firebase Integration standard
 export enum OperationType {
@@ -73,14 +102,52 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 
 // Connection validation on boot as required by skill
 export async function testConnection() {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    console.warn('[Firebase] Browser is offline; skipping startup Firestore connection ping.');
+    return;
+  }
+
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
+
   try {
-    await getDocFromServer(doc(db, 'test', 'ping'));
+    const pingPromise = getDocFromServer(doc(db, 'test', 'connection'))
+      .then(() => ({ status: 'ok' as const }))
+      .catch((err: any) => ({ status: 'error' as const, err }));
+
+    const guardPromise = new Promise<{ status: 'timeout' }>((resolve) => {
+      timeoutId = setTimeout(() => {
+        timedOut = true;
+        resolve({ status: 'timeout' });
+      }, 8000);
+    });
+
+    const outcome = await Promise.race([pingPromise, guardPromise]);
+
+    if (timeoutId) clearTimeout(timeoutId);
+
+    if (outcome.status === 'timeout') {
+      networkDisabledDueToTimeout = true;
+      await disableNetwork(db).catch(() => {});
+      console.warn('[Firebase] Cloud Firestore unreachable within 8s; operating via server API until connection recovers.');
+      return;
+    }
+
+    if (outcome.status === 'error') {
+      throw outcome.err;
+    }
+
     console.log('[Firebase] Connected to Firestore database:', firebaseConfig.firestoreDatabaseId);
   } catch (error: any) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.warn('[Firebase] Client is offline. Please check network.');
+    if (timeoutId) clearTimeout(timeoutId);
+    if (timedOut) return;
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.includes('the client is offline') || msg.includes('Could not reach Cloud Firestore backend')) {
+      networkDisabledDueToTimeout = true;
+      await disableNetwork(db).catch(() => {});
+      console.warn('[Firebase] Client offline or Firestore unreachable; operating via server API.');
     } else {
-      console.warn('[Firebase] Connection ping notice:', error?.message || error);
+      console.warn('[Firebase] Connection ping notice:', msg);
     }
   }
 }
